@@ -1,3 +1,8 @@
+# Note
+
+Forked this for my own convenience. Release includes bugfixes from [noDRM](https://github.com/noDRM) that were not in latest release and partial support of Kindle for PC 1.40 .
+I will probably not maintain this, unless I need some functionality. 
+
 # DeDRM_tools
 DeDRM tools for ebooks
 
