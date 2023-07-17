@@ -56,8 +56,8 @@ except ImportError:
             except ImportError:
                 # Windows-friendly choice: pylzma wheels
                 import pylzma as lzma
-from kfxtables import *
 
+from kfxtables import *
 
 TID_NULL = 0
 TID_BOOLEAN = 1
@@ -770,7 +770,7 @@ def pkcs7unpad(msg, blocklen):
 
 
 # every VoucherEnvelope version has a corresponding "word" and magic number, used in obfuscating the shared secret
-# 4-digit versions use their own obfuscation/scramble. It does not seem to depend on the "word" and number 
+# 4-digit versions use their own obfuscation/scramble. It does not seem to depend on the "word" and number
 OBFUSCATION_TABLE = {
     "V1":    (0x00, None),
     "V2":    (0x05, b'Antidisestablishmentarianism'),
@@ -800,7 +800,7 @@ OBFUSCATION_TABLE = {
     "V26":   (0x06, b'\x03IL\x1e"K\x1f\x0f\x1fp0\x01`X\x02z0`\x03\x0eN\x07'),
     "V27":   (0x07, b'Xk\x10y\x02\x18\x10\x17\x1d,\x0e\x05e\x10\x15"e\x0fh(\x06s\x1c\x08I\x0c\x1b\x0e'),
     "V28":   (0x0A, b'6P\x1bs\x0f\x06V.\x1cM\x14\x02\n\x1b\x07{P0:\x18zaU\x05'),
-    "V9708": (0x05, b'\x1diIm\x08a\x17\x1e!am\x1d\x1aQ.\x16!\x06*\x04\x11\t\x06\x04?'),#(0x05, b'\x1diIm\x08a\x17\x1e!am\x1d\x1aQ.\x16!\x06*\}x04\x11\t\x06\x04?'),
+    "V9708": (0x05, b'\x1diIm\x08a\x17\x1e!am\x1d\x1aQ.\x16!\x06*\x04\x11\t\x06\x04?'),
     "V1031": (0x08, b'Antidisestablishmentarianism'),
     "V2069": (0x07, b'Floccinaucinihilipilification'),
     "V9041": (0x06, b'>\x14\x0c\x12\x10-\x13&\x18U\x1d\x05Rlt\x03!\x19\x1b\x13\x04]Y\x19,\t\x1b'),
@@ -811,6 +811,8 @@ OBFUSCATION_TABLE = {
     "V4648": (0x07, b'X.\x0eW\x1c*K\x12\x12\t\n\n\x17Wx\x01\x02Yf\x0f\x18\x1bVXPi\x01'),
     "V5683": (0x05, b'z3\n\x039\x12\x13`\x06=v;\x02MTK\x1e%}L\x1c\x1f\x15\x0c\x11\x02\x0c\n8\x17p'),
 }
+
+
 #common str:  "PIDv3AESAES/CBC/PKCS5PaddingHmacSHA256"
 class workspace(object):
   def __init__(self,initial_list):
@@ -859,7 +861,7 @@ class workspace(object):
         moff+=0x100
         nib4=matrix[moff+offset+((uv3>>0x10)&0xf) |( (uv2>>0xc)&0xf0)]
         moff+=0x100
-      
+
       rnib1=matrix[moff+offset+nib1*0x10+nib2]
       moff+=0x100
       rnib2=matrix[moff+offset+nib3*0x10+nib4]
@@ -978,7 +980,7 @@ def process_V2069(st):
     sto+=16
     remln-=16
   return bytes(out)
-  
+
 
 def process_V9041(st):
   #11f7db074b24e560dfa6fae3252b383c3b936e51f6ded570dc936cb1da9f4fc4a97ec686e7d8
@@ -994,7 +996,7 @@ def process_V9041(st):
     ws.sbox(d0x6a08f170,d0x6a0dab50,[1])
     ws.sbox(d0x6a08f170,d0x6a0dab50,[1])
     ws.sbox(d0x6a094170,d0x6a0dab50,[1])
-    
+
     ws.exlookup(d0x6a093170)
     dat=ws.mask(st[sto:sto+16])
     out+=dat
@@ -1045,7 +1047,7 @@ def process_V6052(st):
     ws.sbox(d0x6a0a9b20,d0x6a0dab50,[1,3])
     ws.sbox(d0x6a0a9b20,d0x6a0dab50,[1,3])
     ws.sbox(d0x6a0a4b20,d0x6a0dab50,[1,3])
-    
+
     ws.exlookup(d0x6a0a8b20)
     dat=ws.mask(st[sto:sto+16])
     out+=dat
@@ -1071,7 +1073,7 @@ def process_V9479(st):
     ws.shuffle(repl)
     ws.sbox(d0x6a0b47f8,d0x6a0dab50,[1,2,3])
     ws.exlookup(d0x6a0b37f8)
-    
+
     dat=ws.mask(st[sto:sto+16])
     out+=dat
     sto+=16
@@ -1151,6 +1153,76 @@ def process_V5683(st):
   return bytes(out)
 
 
+# def a2hex(arr):
+#   ax=[]
+#   ha="0123456789abcdef"
+#   for a in arr:
+#     if a<0: a=256+a
+#     ax.append(ha[(a>>4)]+ha[a%16])
+#   return "".join(ax)
+# 
+# def memhex(adr,sz):
+#   emu=EmulatorHelper(currentProgram)
+#   arr=emu.readMemory(getAddress(adr),sz)
+#   return a2hex(arr)
+# 
+
+
+
+
+# obfuscate shared secret according to the VoucherEnvelope version
+def obfuscate(secret, version):
+    if version == 1:  # v1 does not use obfuscation
+        return secret
+
+    magic, word = OBFUSCATION_TABLE["V%d" % version]
+
+    # extend secret so that its length is divisible by the magic number
+    if len(secret) % magic != 0:
+        secret = secret + b'\x00' * (magic - len(secret) % magic)
+
+    secret = bytearray(secret)
+
+    obfuscated = bytearray(len(secret))
+    wordhash = bytearray(hashlib.sha256(word).digest())
+
+    # shuffle secret and xor it with the first half of the word hash
+    for i in range(0, len(secret)):
+        index = i // (len(secret) // magic) + magic * (i % (len(secret) // magic))
+        obfuscated[index] = secret[i] ^ wordhash[index % 16]
+
+    return obfuscated
+
+
+
+# scramble() and obfuscate2() from https://github.com/andrewc12/DeDRM_tools/commit/d9233d61f00d4484235863969919059f4d0b2057
+
+def scramble(st,magic):
+    ret=bytearray(len(st))
+    padlen=len(st)
+    for counter in range(len(st)):
+        ivar2=(padlen//2)-2*(counter%magic)+magic+counter-1
+        ret[ivar2%padlen]=st[counter]
+    return ret
+
+
+def obfuscate2(secret, version):
+    if version == 1:  # v1 does not use obfuscation
+        return secret
+    magic, word = OBFUSCATION_TABLE["V%d" % version]
+    # extend secret so that its length is divisible by the magic number
+    if len(secret) % magic != 0:
+        secret = secret + b'\x00' * (magic - len(secret) % magic)
+    obfuscated = bytearray(len(secret))
+    wordhash = bytearray(hashlib.sha256(word).digest()[16:])
+    #print(wordhash.hex())
+    shuffled = bytearray(scramble(secret,magic))
+    for i in range(0, len(secret)):
+        obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
+    return obfuscated
+
+# scramble3() and obfuscate3() from https://github.com/Satsuoni/DeDRM_tools/commit/da6b6a0c911b6d45fe1b13042b690daebc1cc22f
+
 def scramble3(st,magic):
   ret=bytearray(len(st))
   padlen=len(st)
@@ -1188,7 +1260,7 @@ def scramble3(st,magic):
           uVar4 = offset
           if (magic <= offset):
             uVar4 = magic - 1
-          
+
           index = ((padlen - 1) - cntr)
           iVar5 = iVar3 * magic
           while True:
@@ -1203,21 +1275,6 @@ def scramble3(st,magic):
       offset = offset + 1
       if offset >= ((magic - 1) + divs) :break 
   return ret
-  
-
-def a2hex(arr):
-  ax=[]
-  ha="0123456789abcdef"
-  for a in arr:
-    if a<0: a=256+a
-    ax.append(ha[(a>>4)]+ha[a%16])
-  return "".join(ax)
-
-def memhex(adr,sz):
-  emu=EmulatorHelper(currentProgram)
-  arr=emu.readMemory(getAddress(adr),sz)
-  return a2hex(arr)
-
 
 #not sure if the third variant is used anywhere, but it is in Kindle, so I tried to add it
 def obfuscate3(secret, version):
@@ -1230,61 +1287,13 @@ def obfuscate3(secret, version):
     #secret = bytearray(secret)
     obfuscated = bytearray(len(secret))
     wordhash = bytearray(hashlib.sha256(word).digest())
-    print(wordhash.hex())
+    #print(wordhash.hex())
     shuffled=bytearray(scramble3(secret,magic))
-    print(shuffled)
+    #print(shuffled)
     # shuffle secret and xor it with the first half of the word hash
     for i in range(0, len(secret)):
         obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
     return obfuscated
-    
-def scramble(st,magic):
-  ret=bytearray(len(st))
-  padlen=len(st)
-  for counter in range(len(st)):
-    ivar2=(padlen//2)-2*(counter%magic)+magic+counter-1
-    ret[ivar2%padlen]=st[counter]
-  return ret
-  
-def obfuscate2(secret, version):
-    if version == 1:  # v1 does not use obfuscation
-        return secret
-    magic, word = OBFUSCATION_TABLE["V%d" % version]
-    # extend secret so that its length is divisible by the magic number
-    if len(secret) % magic != 0:
-        secret = secret + b'\x00' * (magic - len(secret) % magic)
-    obfuscated = bytearray(len(secret))
-    wordhash = bytearray(hashlib.sha256(word).digest()[16:])
-    print(wordhash.hex())
-    shuffled=bytearray(scramble(secret,magic))
-    # shuffle secret and xor it with the first half of the word hash
-    for i in range(0, len(secret)):
-        obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
-    return obfuscated
-
-# obfuscate shared secret according to the VoucherEnvelope version
-def obfuscate(secret, version):
-    if version == 1:  # v1 does not use obfuscation
-        return secret
-
-    magic, word = OBFUSCATION_TABLE["V%d" % version]
-
-    # extend secret so that its length is divisible by the magic number
-    if len(secret) % magic != 0:
-        secret = secret + b'\x00' * (magic - len(secret) % magic)
-
-    secret = bytearray(secret)
-
-    obfuscated = bytearray(len(secret))
-    wordhash = bytearray(hashlib.sha256(word).digest())
-
-    # shuffle secret and xor it with the first half of the word hash
-    for i in range(0, len(secret)):
-        index = i // (len(secret) // magic) + magic * (i % (len(secret) // magic))
-        obfuscated[index] = secret[i] ^ wordhash[index % 16]
-
-    return obfuscated
-
 
 class DrmIonVoucher(object):
     envelope = None
@@ -1319,6 +1328,7 @@ class DrmIonVoucher(object):
 
     def decryptvoucher(self):
         shared = ("PIDv3" + self.encalgorithm + self.enctransformation + self.hashalgorithm).encode('ASCII')
+
         self.lockparams.sort()
         for param in self.lockparams:
             if param == "ACCOUNT_SECRET":
@@ -1327,31 +1337,35 @@ class DrmIonVoucher(object):
                 shared += param.encode('ASCII') + self.dsn
             else:
                 _assert(False, "Unknown lock parameter: %s" % param)
+
+
         # i know that version maps to scramble pretty much 1 to 1, but there was precendent where they changed it, so... 
         sharedsecrets = [obfuscate(shared, self.version),obfuscate2(shared, self.version),obfuscate3(shared, self.version),
                          process_V9708(shared), process_V1031(shared), process_V2069(shared), process_V9041(shared),
                          process_V3646(shared), process_V6052(shared), process_V9479(shared), process_V9888(shared),
                          process_V4648(shared), process_V5683(shared)]
+        
         decrypted=False
         ex=None
         for sharedsecret in sharedsecrets:
-          key = hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest()
-          aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
-          try:
-            b = aes.decrypt(self.ciphertext)
-            b = pkcs7unpad(b, 16)
-            self.drmkey = BinaryIonParser(BytesIO(b))
-            addprottable(self.drmkey)
-            _assert(self.drmkey.hasnext() and self.drmkey.next() == TID_LIST and self.drmkey.gettypename() == "com.amazon.drm.KeySet@1.0",
-                "Expected KeySet, got %s" % self.drmkey.gettypename())
-            decrypted=True 
-            print("Decryption succeeded")
-            break
-          except Exception as ex:
-            print("Decryption failed, trying next fallback ")
-        if not decrypted:
-          raise ex
+            key = hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest()
+            aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
+            try:
+                b = aes.decrypt(self.ciphertext)
+                b = pkcs7unpad(b, 16)
+                self.drmkey = BinaryIonParser(BytesIO(b))
+                addprottable(self.drmkey)
 
+                _assert(self.drmkey.hasnext() and self.drmkey.next() == TID_LIST and self.drmkey.gettypename() == "com.amazon.drm.KeySet@1.0",
+                    "Expected KeySet, got %s" % self.drmkey.gettypename())
+                decrypted=True 
+
+                print("Decryption succeeded")
+                break
+            except Exception as ex:
+                print("Decryption failed, trying next fallback ")
+        if not decrypted:
+            raise ex
 
         self.drmkey.stepin()
         while self.drmkey.hasnext():
@@ -1385,7 +1399,6 @@ class DrmIonVoucher(object):
         while self.envelope.hasnext():
             self.envelope.next()
             field = self.envelope.getfieldname()
-            print(field)
             if field == "voucher":
                 self.voucher = BinaryIonParser(BytesIO(self.envelope.lobvalue()))
                 addprottable(self.voucher)
@@ -1399,10 +1412,6 @@ class DrmIonVoucher(object):
             while self.envelope.hasnext():
                 self.envelope.next()
                 field = self.envelope.getfieldname()
-                try:
-                 print(self.envelope.stringvalue())
-                except:
-                 pass
                 if field == "encryption_algorithm":
                     self.encalgorithm = self.envelope.stringvalue()
                 elif field == "encryption_transformation":
