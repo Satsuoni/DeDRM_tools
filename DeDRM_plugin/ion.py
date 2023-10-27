@@ -746,7 +746,7 @@ SYM_NAMES = [ 'com.amazon.drm.Envelope@1.0',
               ] + ['com.amazon.drm.VoucherEnvelope@%d.0' % n
                    for n in list(range(2, 29)) + [
                                    9708, 1031, 2069, 9041, 3646,
-                                   6052, 9479, 9888, 4648, 5683]]
+                                   6052, 9479, 9888, 4648, 5683, 4083, 8495]]
 
 def addprottable(ion):
     ion.addtocatalog("ProtectedData", 1, SYM_NAMES)
@@ -813,6 +813,9 @@ OBFUSCATION_TABLE = {
     "V9888": (0x05, b"K\x0c6\x1d\x1a\x17pO}Rk\x1d'w1^\x1f$\x1c{C\x02Q\x06\x1d`"),
     "V4648": (0x07, b'X.\x0eW\x1c*K\x12\x12\t\n\n\x17Wx\x01\x02Yf\x0f\x18\x1bVXPi\x01'),
     "V5683": (0x05, b'z3\n\x039\x12\x13`\x06=v;\x02MTK\x1e%}L\x1c\x1f\x15\x0c\x11\x02\x0c\n8\x17p'),
+    "V4083": (0x05, b'Dontknow'),
+    "V8495": (0x05, b'Dontcareunused'),
+
 }
 
 
@@ -1155,20 +1158,25 @@ def process_V5683(st):
     remln-=16
   return bytes(out)
 
-
-# def a2hex(arr):
-#   ax=[]
-#   ha="0123456789abcdef"
-#   for a in arr:
-#     if a<0: a=256+a
-#     ax.append(ha[(a>>4)]+ha[a%16])
-#   return "".join(ax)
-# 
-# def memhex(adr,sz):
-#   emu=EmulatorHelper(currentProgram)
-#   arr=emu.readMemory(getAddress(adr),sz)
-#   return a2hex(arr)
-# 
+def process_V4083(st):
+  #ad6785710c2017d598ef45bc864702d0689ac4de54ad3b3088b312799c1fd50430f42012d9db
+  ws=workspace([0x61,0x4e,0x64,0x52,0x67,0x55,0x6b,0x58,0x70,0x32,0x73,0x35,0x76,0x38,0x79,0x2f])
+  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
+  remln=len(st)
+  sto=0
+  out=[]
+  while(remln>0):
+    ws.shuffle(repl)
+    ws.sbox(d0x2b8f58,d0x2bcf58,[])
+    ws.sbox(d0x2b3f58,d0x2bcf58,[])
+    ws.shuffle(repl)
+    ws.sbox(d0x2b3f58,d0x2bcf58,[])
+    ws.exlookup(d0x2b7f58)    
+    dat=ws.mask(st[sto:sto+16])
+    out+=dat
+    sto+=16
+    remln-=16
+  return bytes(out)
 
 
 
@@ -1341,12 +1349,12 @@ class DrmIonVoucher(object):
             else:
                 _assert(False, "Unknown lock parameter: %s" % param)
 
-
+        placeholder=b'\xf1V#\xbd\x1cn\r\xea@7&PT1w]\x87n9\xa3\xb23\x87\xf9@9\xb6n\x8c\xfen\xe1\xab4n\xad&\x8c\xd2\xea\xd0!t\xc0\x94S\xbe\x90\x1b\xec\xa7\xec\x88\x1b\x19#\xa3i7\xa1B\xdf\x8c\x8fVy1\xa1%\xd44!\xcd@\x05\xc0A\xeaI\x9c\xdb\xeb!`[n3x#\xec@\r\xe4p\xb2\xf9\xb69\xa7V\xb2\x8e3\x1c\xec+\xdf\x87@\x0b\xeb<[L9<\xec\xde\x844\x05a\x8c\xe8FS|\xec@\xb2A![k\x1f|@\x89\xe6\xc0\x8d\xf1\xf61\xfe\x8e\x05\x8c\xba\xec9\xddA9\xfe\xbepnJ\xbe\xf6\r\xbe\xe4\xea\xeft/\xae\x9a\x15\xdc\xef*&\xa3\xe17\x84k@gK\xf1\xeb\r\xee#\x8c\xa2(y\xb6\xb6\x84\x8b\xf5J1R\x8e\x90&A\xe4\x0eY/\x13;\x94OZ\xec\x1b\x87\xf9\xda7i\xa3+47\xe4n\xa2tS\x1b\x1c\xe2\xec\xb6I\x05r!\x87+\x13&\xdc\x80\x90\xf11<\xe3\xc9V\xfb::\x8c\x8f'
         # i know that version maps to scramble pretty much 1 to 1, but there was precendent where they changed it, so... 
         sharedsecrets = [obfuscate(shared, self.version),obfuscate2(shared, self.version),obfuscate3(shared, self.version),
                          process_V9708(shared), process_V1031(shared), process_V2069(shared), process_V9041(shared),
                          process_V3646(shared), process_V6052(shared), process_V9479(shared), process_V9888(shared),
-                         process_V4648(shared), process_V5683(shared)]
+                         process_V4648(shared), process_V5683(shared), process_V4083(shared),placeholder]
         
         decrypted=False
         ex=None
