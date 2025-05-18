@@ -57,8 +57,10 @@ except ImportError:
             except ImportError:
                 # Windows-friendly choice: pylzma wheels
                 import pylzma as lzma
-
-from .kfxtables import *
+try:
+ from .kfxtables import *
+except:
+ from kfxtables import *
 
 TID_NULL = 0
 TID_BOOLEAN = 1
@@ -744,7 +746,9 @@ SYM_NAMES = [ 'com.amazon.drm.Envelope@1.0',
               ] + ['com.amazon.drm.VoucherEnvelope@%d.0' % n
                    for n in list(range(2, 29)) + [
                                    9708, 1031, 2069, 9041, 3646,
-                                   6052, 9479, 9888, 4648, 5683]]
+                                   6052, 9479, 9888, 4648, 5683,7384,2746,3332]+list(range(10001,11111))] #this assumes there are no new types added aside from voucher envelopes. So far it was largely correct
+                                   
+
 
 def addprottable(ion):
     ion.addtocatalog("ProtectedData", 1, SYM_NAMES)
@@ -1176,7 +1180,7 @@ def obfuscate(secret, version):
     if version == 1:  # v1 does not use obfuscation
         return secret
 
-    magic, word = OBFUSCATION_TABLE["V%d" % version]
+    magic, word = OBFUSCATION_TABLE.get("V%d" % version,(1,b"unknown"))
 
     # extend secret so that its length is divisible by the magic number
     if len(secret) % magic != 0:
@@ -1210,7 +1214,7 @@ def scramble(st,magic):
 def obfuscate2(secret, version):
     if version == 1:  # v1 does not use obfuscation
         return secret
-    magic, word = OBFUSCATION_TABLE["V%d" % version]
+    magic, word = OBFUSCATION_TABLE.get("V%d" % version,(1,b"unknown"))
     # extend secret so that its length is divisible by the magic number
     if len(secret) % magic != 0:
         secret = secret + b'\x00' * (magic - len(secret) % magic)
@@ -1281,7 +1285,7 @@ def scramble3(st,magic):
 def obfuscate3(secret, version):
     if version == 1:  # v1 does not use obfuscation
         return secret
-    magic, word = OBFUSCATION_TABLE["V%d" % version]
+    magic, word = OBFUSCATION_TABLE.get("V%d" % version,(1,b"unknown"))
     # extend secret so that its length is divisible by the magic number
     if len(secret) % magic != 0:
         secret = secret + b'\x00' * (magic - len(secret) % magic)
@@ -1296,6 +1300,28 @@ def obfuscate3(secret, version):
         obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
     return obfuscated
 
+class SKeyList(object):
+    def __init__(self, skeyfile):
+      self.keycandidates={}
+      self.secretkeys={} #let us hope there is one key per voucher...
+      if skeyfile is None: return
+      if os.path.isfile(skeyfile):
+          with open(skeyfile,"r",encoding="utf8") as fl:
+              for line in fl:
+                  sline=line.strip()
+                  if len(sline)<32: continue 
+                  lst=sline.split("$")
+                  if len(lst)<2: continue 
+                  voucherid=lst[0]
+                  for key in lst[1:]:
+                      skey=key.split(":")
+                      if skey[0]=="secret_key":
+                          self.secretkeys[voucherid]=bytes.fromhex(skey[1])
+                      elif skey[0]=="shared_key":
+                          curlist=self.keycandidates.get(voucherid,[])
+                          curlist.append(bytes.fromhex(skey[1]))
+                          self.keycandidates[voucherid]=curlist
+                          
 class DrmIonVoucher(object):
     envelope = None
     version = None
@@ -1313,7 +1339,7 @@ class DrmIonVoucher(object):
     cipheriv = b""
     secretkey = b""
 
-    def __init__(self, voucherenv, dsn, secret):
+    def __init__(self, voucherenv, dsn, secret,skeylist=None):
         self.dsn, self.secret = dsn, secret
 
         if isinstance(dsn, str):
@@ -1323,7 +1349,10 @@ class DrmIonVoucher(object):
             self.secret = secret.encode('ASCII')
 
         self.lockparams = []
-
+        self.keycandidates=[]
+        self.secretkeycandidate=None
+        self.skeylist=skeylist
+        self.voucher_id=""
         self.envelope = BinaryIonParser(voucherenv)
         addprottable(self.envelope)
 
@@ -1348,8 +1377,9 @@ class DrmIonVoucher(object):
 
         decrypted=False
         lastexception = None # type: Exception | None
-        for sharedsecret in sharedsecrets:
-            key = hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest()
+        keycandidates=self.keycandidates+[hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
+        for key in keycandidates:
+            print(f"{key.hex()} {self.cipheriv[:16].hex()}")
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:
                 b = aes.decrypt(self.ciphertext)
@@ -1367,7 +1397,15 @@ class DrmIonVoucher(object):
                 lastexception = ex
                 print("Decryption failed, trying next fallback ")
         if not decrypted:
-            raise lastexception
+            if self.secretkeycandidate is None:
+              print("Failed all decryption attempts and no key candidate available")
+              raise lastexception
+            else:
+                print("Failed all decryption attempts but we have a key candidate")
+                self.secretkey =self.secretkeycandidate
+                self.drmkey=None
+                return
+                 
 
         self.drmkey.stepin()
         while self.drmkey.hasnext():
@@ -1393,8 +1431,10 @@ class DrmIonVoucher(object):
     def parse(self):
         self.envelope.reset()
         _assert(self.envelope.hasnext(), "Envelope is empty")
-        _assert(self.envelope.next() == TID_STRUCT and str.startswith(self.envelope.gettypename(), "com.amazon.drm.VoucherEnvelope@"),
+        tn=self.envelope.gettypename()
+        _assert(self.envelope.next() == TID_STRUCT and str.startswith(tn, "com.amazon.drm.VoucherEnvelope@"),
                 "Unknown type encountered in envelope, expected VoucherEnvelope")
+        print(f"Envelope version {tn}")
         self.version = int(self.envelope.gettypename().split('@')[1][:-2])
 
         self.envelope.stepin()
@@ -1430,7 +1470,13 @@ class DrmIonVoucher(object):
             self.envelope.stepout()
 
         self.parsevoucher()
-
+        if self.skeylist is not None:
+            self.keycandidates=self.skeylist.keycandidates.get(self.voucher_id,[])
+            print(f"Got {len(self.keycandidates)} shared key candidates {self.skeylist.keycandidates} {self.voucher_id}")
+            self.secretkeycandidate=self.skeylist.secretkeys.get(self.voucher_id,None)
+            if self.secretkeycandidate is not None:
+                print(f"Got secret key candidate from file: {self.secretkeycandidate.hex()}")
+           
     def parsevoucher(self):
         _assert(self.voucher.hasnext(), "Voucher is empty")
         _assert(self.voucher.next() == TID_STRUCT and self.voucher.gettypename() == "com.amazon.drm.Voucher@1.0",
@@ -1444,6 +1490,8 @@ class DrmIonVoucher(object):
                 self.cipheriv = self.voucher.lobvalue()
             elif self.voucher.getfieldname() == "cipher_text":
                 self.ciphertext = self.voucher.lobvalue()
+            elif self.voucher.getfieldname() == "id":
+                self.voucher_id = self.voucher.stringvalue()
             elif self.voucher.getfieldname() == "license":
                 _assert(self.voucher.gettypename() == "com.amazon.drm.License@1.0",
                         "Unknown license: %s" % self.voucher.gettypename())

@@ -42,6 +42,7 @@ class DeDRM_Prefs():
         self.dedrmprefs.defaults['adobe_pdf_passphrases'] = []
         self.dedrmprefs.defaults['adobewineprefix'] = ""
         self.dedrmprefs.defaults['kindlewineprefix'] = ""
+        self.dedrmprefs.defaults['kindleextrakeyfile'] = ""
 
         # initialise
         # we must actually set the prefs that are dictionaries and lists

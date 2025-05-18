@@ -19,7 +19,7 @@ from io import BytesIO
 #@@CALIBRE_COMPAT_CODE@@
 
 
-from ion import DrmIon, DrmIonVoucher
+from ion import DrmIon, DrmIonVoucher, SKeyList
 
 
 
@@ -28,8 +28,9 @@ __version__ = '2.0'
 
 
 class KFXZipBook:
-    def __init__(self, infile):
+    def __init__(self, infile,skeyfile=None):
         self.infile = infile
+        self.skeylist=SKeyList(skeyfile)
         self.voucher = None
         self.decrypted = {}
 
@@ -81,7 +82,7 @@ class KFXZipBook:
                 continue
 
             try:
-                voucher = DrmIonVoucher(BytesIO(data), pid[:dsn_len], pid[dsn_len:])
+                voucher = DrmIonVoucher(BytesIO(data), pid[:dsn_len], pid[dsn_len:],self.skeylist)
                 voucher.parse()
                 voucher.decryptvoucher()
                 break
