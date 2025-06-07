@@ -30,7 +30,10 @@ __version__ = '2.0'
 class KFXZipBook:
     def __init__(self, infile,skeyfile=None):
         self.infile = infile
-        self.skeylist=SKeyList(skeyfile)
+        if skeyfile is not None:
+          self.skeylist=SKeyList(skeyfile)
+        else:
+          self.skeylist=None
         self.voucher = None
         self.decrypted = {}
 
@@ -49,7 +52,7 @@ class KFXZipBook:
                         self.decrypt_voucher(totalpids)
                     print("Decrypting KFX DRMION: {0}".format(filename))
                     outfile = BytesIO()
-                    DrmIon(BytesIO(data[8:-8]), lambda name: self.voucher).parse(outfile)
+                    DrmIon(BytesIO(data[8:-8]), lambda name: self.voucher,self.skeylist).parse(outfile)
                     self.decrypted[filename] = outfile.getvalue()
 
         if not self.decrypted:
@@ -90,7 +93,9 @@ class KFXZipBook:
                 traceback.print_exc()
                 pass
         else:
-            raise Exception("Failed to decrypt KFX DRM voucher with any key")
+            print("Failed to decrypt KFX DRM voucher with any key... Hoping that keylist has a book key. ")
+            self.voucher = voucher
+            return
 
         print("KFX DRM voucher successfully decrypted")
 

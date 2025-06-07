@@ -1530,11 +1530,11 @@ class DrmIon(object):
     key = b""
     onvoucherrequired = None
 
-    def __init__(self, ionstream, onvoucherrequired):
+    def __init__(self, ionstream, onvoucherrequired,skeylist=None):
         self.ion = BinaryIonParser(ionstream)
         addprottable(self.ion)
         self.onvoucherrequired = onvoucherrequired
-
+        self.skeylist = skeylist
     def parse(self, outpages):
         self.ion.reset()
 
@@ -1555,14 +1555,24 @@ class DrmIon(object):
                     self.ion.stepin()
                     while self.ion.hasnext():
                         self.ion.next()
-                        if self.ion.getfieldname() != "encryption_voucher":
+                        fname=self.ion.getfieldname()
+                        if self.key is None or len(self.key)==0:
+                            if fname=="encryption_key":
+                                keyname=self.ion.stringvalue()
+                                if self.skeylist is not None:
+                                    self.key=self.skeylist.secretkeys.get(keyname,self.key) # i know they are supposed to be voucher ids, but it is easier to dump them all into one file, their UIDs are distinct anyway
+                                    if self.key is not None and len(self.key)>10:
+                                        print("Obtained secret key from list: {}".format(self.key.hex()))
+                        if  fname != "encryption_voucher":
                             continue
 
                         if self.vouchername == "":
                             self.vouchername = self.ion.stringvalue()
                             self.voucher = self.onvoucherrequired(self.vouchername)
-                            self.key = self.voucher.secretkey
-                            _assert(self.key is not None, "Unable to obtain secret key from voucher")
+                            if self.voucher is not None and self.voucher.secretkey is not None and len(self.voucher.secretkey)>0:
+                                self.key = self.voucher.secretkey
+                                _assert(self.key is not None, "Unable to obtain secret key from voucher")
+                                
                         else:
                             _assert(self.vouchername == self.ion.stringvalue(),
                                     "Unexpected: Different vouchers required for same file?")
@@ -1583,7 +1593,7 @@ class DrmIon(object):
                             ct = self.ion.lobvalue()
                         elif self.ion.getfieldname() == "cipher_iv":
                             civ = self.ion.lobvalue()
-
+                    _assert(self.key is not None, "Unable to obtain secret key from voucher or keylist")
                     if ct is not None and civ is not None:
                         self.processpage(ct, civ, outpages, decompress, decrypt)
                     self.ion.stepout()
