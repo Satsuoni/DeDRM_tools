@@ -37,6 +37,12 @@ OPT_SHORT_TO_LONG = [
 
 import os, sys
 
+# When executed as a module ("python -m DeDRM_plugin.standalone.__init__"),
+# this file becomes '__main__'. Ensure the package name also maps to this
+# module so that sibling modules can reliably import it.
+if __name__ == "__main__":
+    sys.modules.setdefault('DeDRM_plugin.standalone.__init__', sys.modules[__name__])
+
 
 global _additional_data
 global _additional_params
@@ -47,6 +53,9 @@ _function = None
 
 global config_file_path
 config_file_path = "dedrm.json"
+
+# Path to a Kindle voucher key file passed via --keyfile
+kfx_skeyfile = None
 
 def print_fname(f, info):
     print("  " + f.ljust(15) + " " + info)
@@ -72,13 +81,13 @@ def print_std_usage(name, param_string):
         print("  python3 DeDRM_plugin.zip "+name+" "+param_string, file=sys.stderr)
 
 def print_err_header():
-    from __init__ import PLUGIN_NAME, PLUGIN_VERSION # type: ignore
+    from ..__version import PLUGIN_NAME, PLUGIN_VERSION
 
     print(PLUGIN_NAME + " v" + PLUGIN_VERSION + " - DRM removal plugin by noDRM")
     print()
 
 def print_help():
-    from __version import PLUGIN_NAME, PLUGIN_VERSION
+    from ..__version import PLUGIN_NAME, PLUGIN_VERSION
     print(PLUGIN_NAME + " v" + PLUGIN_VERSION + " - DRM removal plugin by noDRM")
     print("Based on DeDRM Calibre plugin by Apprentice Harper, Apprentice Alf and others.")
     print("See https://github.com/noDRM/DeDRM_tools for more information.")
@@ -98,7 +107,7 @@ def print_help():
     # TODO: All parameters that are global should be listed here.
 
 def print_credits():
-    from __version import PLUGIN_NAME, PLUGIN_VERSION
+    from ..__version import PLUGIN_NAME, PLUGIN_VERSION
     print(PLUGIN_NAME + " v" + PLUGIN_VERSION + " - Calibre DRM removal plugin by noDRM")
     print("Based on DeDRM Calibre plugin by Apprentice Harper, Apprentice Alf and others.")
     print("See https://github.com/noDRM/DeDRM_tools for more information.")
@@ -122,15 +131,21 @@ def handle_single_argument(arg, next):
     global _additional_params
     global config_file_path
     
-    if arg in ["--username", "--password", "--output", "--outputdir"]: 
+    global kfx_skeyfile
+
+    if arg in ["--username", "--password", "--output", "--outputdir", "--keyfile"]:
         used_up = 1
         _additional_params.append(arg)
-        if next is None or len(next) == 0: 
+        if next is None or len(next) == 0:
             print_err_header()
             print("Missing parameter for argument " + arg, file=sys.stderr)
             sys.exit(1)
         else:
-            _additional_params.append(next[0])
+            val = next[0]
+            if arg == "--keyfile":
+                kfx_skeyfile = val
+            else:
+                _additional_params.append(val)
     
     elif arg == "--config":
         if next is None or len(next) == 0: 
@@ -173,14 +188,14 @@ def execute_action(action, filenames, params):
         sys.exit(0)
     
     elif action == "passhash": 
-        from standalone.passhash import perform_action
+        from .passhash import perform_action
         perform_action(params, filenames)
 
     elif action == "remove_drm":
         if not os.path.isfile(os.path.abspath(config_file_path)):
             print("Config file missing ...")
         
-        from standalone.remove_drm import perform_action
+        from .remove_drm import perform_action
         perform_action(params, filenames)
         
     elif action == "config":

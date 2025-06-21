@@ -23,13 +23,13 @@ change in the future.
 
 import os, sys
 
-from standalone.__init__ import print_opt, print_std_usage
+from .__init__ import print_opt, print_std_usage
 
 iswindows = sys.platform.startswith('win')
 isosx = sys.platform.startswith('darwin')
 
 def print_passhash_help():
-    from __version import PLUGIN_NAME, PLUGIN_VERSION
+    from ..__version import PLUGIN_NAME, PLUGIN_VERSION
     print(PLUGIN_NAME + " v" + PLUGIN_VERSION + " - Calibre DRM removal plugin by noDRM")
     print()
     print("passhash: Manage Adobe PassHashes")
