@@ -110,7 +110,7 @@ def determine_file_type(file):
      
 
 
-def dedrm_single_file(input_file, output_file):
+def dedrm_single_file(input_file, output_file,skeyfile=None):
     # When this runs, all the stupid file handling is done. 
     # Just take the file at the absolute path "input_file"
     # and export it, DRM-free, to "output_file". 
@@ -150,8 +150,8 @@ def dedrm_single_file(input_file, output_file):
 
     if ftype == "KFX-ZIP":
         from ..kfxdedrm import KFXZipBook
-        from .__init__ import kfx_skeyfile
-        keyfile = kfx_skeyfile
+        keyfile = skeyfile
+        print(f"Using keyfile {keyfile}")
         temp_keyfile = None
         try:
             book = KFXZipBook(input_file, keyfile)
@@ -181,7 +181,7 @@ def perform_action(params, files):
     outputdir = None
     force = False
     overwrite_original = False
-
+    skeyfile=None
 
     if len(files) == 0:
         print_removedrm_help()
@@ -193,6 +193,8 @@ def perform_action(params, files):
             output = params.pop(0)
         elif p == "--outputdir":
             outputdir = params.pop(0)
+        elif p == "--keyfile":
+            skeyfile = params.pop(0)
         elif p == "--force":
             force = True
         elif p == "--overwrite":
@@ -258,7 +260,7 @@ def perform_action(params, files):
 
         
 
-        dedrm_single_file(file, output_filename)
+        dedrm_single_file(file, output_filename,skeyfile)
 
        
 

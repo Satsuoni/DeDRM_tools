@@ -6,6 +6,7 @@ from frida_tools.reactor import Reactor
 import threading
 import sys
 import signal
+import numbers
 ##copied out from ion.py and subtly modified
 
 TID_NULL = 0
@@ -832,11 +833,10 @@ class MiniReactor(object):
         else:
             if host=="local":
                 self._host=None
-                self._device_type="local"
+                self._device_type=None#"local"
             else:
                 self._host=host
                 self._device_type="remote"
-        self._host=host
         self._device_id=None
         self._keepalive_interval=None
         self._schedule_on_output = lambda pid, fd, data: self._reactor.schedule(lambda: self._on_output(pid, fd, data))
@@ -872,7 +872,7 @@ class MiniReactor(object):
                 return
         elif (self._host is not None) or (self._device_type == "remote"):
             host = self._host
-
+            print("remote")
             options = {}
             if self._keepalive_interval is not None:
                 options["keepalive_interval"] = self._keepalive_interval

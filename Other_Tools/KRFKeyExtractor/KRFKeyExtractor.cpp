@@ -270,7 +270,6 @@ bool enumerateKindleFolder(TCHAR *path, DrmParameters * out)
 }
 
 
-
 int  tryOpeningBook(KrfAccessFunctions* ctx, const std::string& serial, const std::string& secret, DrmParameters* params,KeyData* out)
 {
     keydataAccumulator.reset();
@@ -280,16 +279,23 @@ int  tryOpeningBook(KrfAccessFunctions* ctx, const std::string& serial, const st
     secrets.push_back(secret);
     ctx->DrmDataProvider((void*)sub, serial, secrets, params->vouchers);
     void* bookFactory = ctx->GetBookFactory();
-    int rebook[2];
+    //int rebook[2] = { 0 };
+    std::shared_ptr<void*> rebook;
     krfErr err;
     err.code = 0;
-    ctx->OpenBook(bookFactory, rebook, params->bookFile, sub, &err, params->resources);
+    ctx->OpenBook(bookFactory, &rebook, params->bookFile, sub, &err, params->resources);
     std::cout << "BookOpen error " << err.code << " " << err.msg << std::endl;
     if (err.code == 0)
     {
         out->aggregate( &keydataAccumulator);
         //return true;
     }
+    //std::cout << rebook[0]<< std::endl;
+    if (rebook != nullptr)
+    {
+        rebook.reset();
+    }
+
     return err.code;
 }
 
@@ -713,7 +719,7 @@ int main(int argc, char* argv[])
     {
         std::cout << "Usage: executable <memdump path> <kindle documents path> <output file>" << std::endl;
         std::cout << "This program needs accress to Kindle dlls, so it is easiest to run it in the folder with kindle executable or copied dlls" << std::endl;
-        std::cout << "Please ensure that KRFDynamic.dll is of the appropriate version (currently md5 22ccc712f186e3f03567e2bec2189d6a, kindle 2.7.1(70978)" << std::endl;
+        std::cout << "Please ensure that KRFDynamic.dll is of the appropriate version (currently md5 22ccc712f186e3f03567e2bec2189d6a, kindle 2.7.1(70978))" << std::endl;
         return 1;
     }
     HINSTANCE hinstLib;
@@ -721,6 +727,7 @@ int main(int argc, char* argv[])
     std::string dump_path = argv[1];
     std::string folder_path = argv[2];
     std::string out_path = argv[3];
+    std::cout << folder_path << std:: endl;
     //this is a bit dumb but I don't know of good ways of flipping between char types
     std::basic_string<TCHAR> wfolder_path = std::basic_string<wchar_t>(folder_path.begin(),folder_path.end());
     if (hinstLib)

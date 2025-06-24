@@ -54,8 +54,7 @@ _function = None
 global config_file_path
 config_file_path = "dedrm.json"
 
-# Path to a Kindle voucher key file passed via --keyfile
-kfx_skeyfile = None
+# Path to a Kindle voucher key file passed via --keyfile now in remove_drm
 
 def print_fname(f, info):
     print("  " + f.ljust(15) + " " + info)
@@ -130,9 +129,6 @@ def handle_single_argument(arg, next):
     used_up = 0
     global _additional_params
     global config_file_path
-    
-    global kfx_skeyfile
-
     if arg in ["--username", "--password", "--output", "--outputdir", "--keyfile"]:
         used_up = 1
         _additional_params.append(arg)
@@ -143,7 +139,7 @@ def handle_single_argument(arg, next):
         else:
             val = next[0]
             if arg == "--keyfile":
-                kfx_skeyfile = val
+                _additional_params.append(val)
             else:
                 _additional_params.append(val)
     
@@ -212,14 +208,13 @@ def main(argv):
     skip_opts = False
 
     # First element is always the ZIP name, remove that. 
-    if not arguments[0].lower().endswith(".zip") and not "calibre" in sys.modules:
-        print("Warning: File name does not end in .zip ...")
-        print(arguments)
+    #if not arguments[0].lower().endswith(".zip") and not "calibre" in sys.modules:
+    #    print("Warning: File name does not end in .zip ...")
+    #    print(arguments)
     arguments.pop(0)
 
     while len(arguments) > 0:
         arg = arguments.pop(0)
-
         if arg == "--":
             skip_opts = True
             continue

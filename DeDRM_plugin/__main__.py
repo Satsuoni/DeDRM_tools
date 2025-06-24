@@ -27,8 +27,12 @@ Run DeDRM plugin without Calibre.
 
 # Import __init__.py from the standalone folder so we can have all the 
 # standalone / non-Calibre code in that subfolder.
-
-import standalone.__init__ as mdata
+try:
+  import standalone.__init__ as mdata
+  mn=mdata.main
+except:
+  from . import standalone
+  mdata=standalone.main
+  mn=mdata
 import sys
-
-mdata.main(sys.argv)
+mn(sys.argv)

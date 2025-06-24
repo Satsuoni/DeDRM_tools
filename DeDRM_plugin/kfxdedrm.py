@@ -70,8 +70,10 @@ class KFXZipBook:
                     if b'ProtectedData' in data:
                         break   # found DRM voucher
             else:
-                raise Exception("The .kfx-zip archive contains an encrypted DRMION file without a DRM voucher")
-
+                #raise Exception("The .kfx-zip archive contains an encrypted DRMION file without a DRM voucher")
+                print("The .kfx-zip archive contains an encrypted DRMION file without a DRM voucher. Just in case it is a rare decrypted KFX, we continue")
+                self.voucher = None
+                return
         print("Decrypting KFX DRM voucher: {0}".format(info.filename))
 
         for pid in [''] + totalpids:
