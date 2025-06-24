@@ -153,28 +153,6 @@ def dedrm_single_file(input_file, output_file):
         from .__init__ import kfx_skeyfile
         keyfile = kfx_skeyfile
         temp_keyfile = None
-        # Some key files omit the trailing '.voucher' on the voucher ID.
-        # Add a duplicate entry with the suffix so the ion parser can match.
-        if keyfile and os.path.isfile(keyfile):
-            with open(keyfile, "r", encoding="utf8") as fh:
-                lines = fh.read().splitlines()
-            amended = []
-            changed = False
-            for line in lines:
-                amended.append(line)
-                parts = line.split("$", 1)
-                if len(parts) > 1:
-                    vid, rest = parts[0], parts[1]
-                    if not vid.endswith(".voucher"):
-                        amended.append(f"{vid}.voucher${rest}")
-                        changed = True
-            if changed:
-                import tempfile
-                tf = tempfile.NamedTemporaryFile("w", delete=False)
-                tf.write("\n".join(amended) + "\n")
-                tf.close()
-                temp_keyfile = tf.name
-                keyfile = temp_keyfile
         try:
             book = KFXZipBook(input_file, keyfile)
             book.processBook([''])
