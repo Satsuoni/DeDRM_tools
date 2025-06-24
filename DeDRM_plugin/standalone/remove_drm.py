@@ -26,18 +26,27 @@ import os, sys
 from zipfile import ZipInfo, ZipFile, ZIP_STORED, ZIP_DEFLATED
 from contextlib import closing
 
-from standalone.__init__ import print_opt, print_std_usage
+# Ensure absolute imports within the main plugin work when this module is run
+# as part of the standalone package
+package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if package_root not in sys.path:
+    sys.path.insert(0, package_root)
+
+from .__init__ import print_opt, print_std_usage
 
 iswindows = sys.platform.startswith('win')
 isosx = sys.platform.startswith('darwin')
 
+# Path to a Kindle voucher key file used for KFX books
+kfx_skeyfile = None
+
 def print_removedrm_help():
-    from __init__ import PLUGIN_NAME, PLUGIN_VERSION
+    from ..__version import PLUGIN_NAME, PLUGIN_VERSION
     print(PLUGIN_NAME + " v" + PLUGIN_VERSION + " - Calibre DRM removal plugin by noDRM")
     print()
     print("remove_drm: Remove DRM from one or multiple files")
     print()
-    print_std_usage("remove_drm", "<filename> ... [ -o <filename> ] [ -f ]")
+    print_std_usage("remove_drm", "<filename> ... [ -o <filename> ] [ -f ] [ --keyfile <file> ]")
     
     print()
     print("Options: ")
@@ -45,6 +54,7 @@ def print_removedrm_help():
     print_opt("o", "output", "File name to export the file to")
     print_opt("f", "force", "Overwrite output file if it already exists")
     print_opt(None, "overwrite", "Replace DRMed file with DRM-free file (implies --force)")
+    print_opt(None, "keyfile", "Path to a Kindle voucher key file")
 
 
 def determine_file_type(file):
@@ -113,13 +123,53 @@ def dedrm_single_file(input_file, output_file):
     print("File " + input_file + " to " + output_file)
 
     # Okay, first check the file type and don't rely on the extension. 
-    try: 
+    try:
         ftype = determine_file_type(input_file)
-    except: 
+    except Exception as e:
         print("Can't determine file type for this file.")
         ftype = None
+        try:
+            with open(input_file, 'rb') as fh:
+                hdr = fh.read(4)
+            if hdr == b'PK\x03\x04':
+                # check if ZIP contains a DRMION file
+                from zipfile import ZipFile
+                with ZipFile(input_file, 'r') as zf:
+                    for name in zf.namelist():
+                        with zf.open(name) as sf:
+                            if sf.read(8) == b'\xeaDRMION\xee':
+                                ftype = "KFX-ZIP"
+                                break
+                if ftype is None:
+                    ftype = "ZIP"
+        except Exception:
+            pass
     
-    if ftype is None: 
+    if ftype is None:
+        return
+
+    if ftype == "KFX-ZIP":
+        from ..kfxdedrm import KFXZipBook
+        from .__init__ import kfx_skeyfile
+        keyfile = kfx_skeyfile
+        temp_keyfile = None
+        try:
+            book = KFXZipBook(input_file, keyfile)
+            book.processBook([''])
+            # Ensure output directory exists
+            outdir = os.path.dirname(output_file)
+            if outdir and not os.path.isdir(outdir):
+                os.makedirs(outdir, exist_ok=True)
+            book.getFile(output_file)
+            print("Saved decrypted KFX book to " + output_file)
+        except Exception as e:
+            print("Failed to remove DRM: " + str(e), file=sys.stderr)
+        finally:
+            if temp_keyfile:
+                try:
+                    os.unlink(temp_keyfile)
+                except Exception:
+                    pass
         return
 
     
