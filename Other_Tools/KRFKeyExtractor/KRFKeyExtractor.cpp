@@ -326,7 +326,11 @@ T remove_extension(T const& filename)
     typename T::size_type const p(filename.find_last_of('.'));
     return p > 0 && p != T::npos ? filename.substr(0, p) : filename;
 }
-void enumerateKindleDir(const TCHAR* path,const std::string& outfile,std::set<std::string>* serial_candidates, std::set<std::string>* secret_candidates)
+std::string hexhex(const std::string& st)
+{
+    return hexStr((uint8_t*)st.c_str(), st.size());
+}
+void enumerateKindleDir(const TCHAR* path,const std::string& outfile,std::set<std::string>* serial_candidates, std::set<std::string>* secret_candidates,std::string* k4ifile)
 {
     WIN32_FIND_DATA ffd;
     LARGE_INTEGER filesize;
@@ -451,6 +455,69 @@ void enumerateKindleDir(const TCHAR* path,const std::string& outfile,std::set<st
     out.close();
     FindClose(hFind);
     //\"device_serial_number\":\"
+    // DSN extra.dsns kindle.account.tokens kindle.account.secrets
+    if (k4ifile)
+    {
+        std::ofstream k4i(*k4ifile);
+        if (k4i)
+        {
+            std::cout << "Writing DSN and secrets into " << *k4ifile << std::endl;
+            int nst  = 0;
+            k4i << "{";
+            for (auto& serial : working_serials)
+            {
+                switch (nst)
+                {
+                case 0: {
+                    k4i << "\"DSN\": \"" << hexhex(serial) << "\"";
+                    nst = 1;
+                    }; break;
+                case 1: {
+                    k4i <<", \"extra.dsns\": [\""<< hexhex(serial)<< "\"";
+                    nst = 2;
+                }; break;
+                default: {
+                    k4i << ", \"" << hexhex(serial) << "\"";
+                }; break;
+                }
+              
+            }
+            if (nst >= 2)
+            {
+
+                k4i << "]";
+            }
+            int kst = 0;
+            for (auto& secret : working_secrets)
+            {
+                if (nst > 0)
+                {
+                    k4i << ", ";
+                    nst = 0;
+                }
+                switch (kst)
+                {
+                case 0: {
+                    k4i << "\"kindle.account.tokens\": \"" << hexhex(secret) << "\"";
+                    kst = 1;
+                }; break;
+                case 1: {
+                    k4i << ", \"kindle.account.secrets\": [\"" << hexhex(secret) << "\"";
+                    kst = 2;
+                }; break;
+                default: {
+                    k4i << ", \"" << hexhex(secret) << "\"";
+                }; break;
+                }
+            }
+            if (kst > 0)
+            {
+                k4i << "]";
+            }
+            k4i << "}";
+        }
+         
+    }
     std::cout << "Note: the below can be copied into text file and used instead of full memory dump. At least one of the secrets is likely to be spurious/incorrect. " << std::endl;
     for (auto& serial : working_serials)
     {
@@ -460,6 +527,8 @@ void enumerateKindleDir(const TCHAR* path,const std::string& outfile,std::set<st
     {
         std::cout << "Working secret: \"" << secret << "\""<<std::endl;
     }
+    
+    
     return;
 }
 
@@ -717,7 +786,7 @@ int main(int argc, char* argv[])
 {
     if (argc < 4)
     {
-        std::cout << "Usage: executable <memdump path> <kindle documents path> <output file>" << std::endl;
+        std::cout << "Usage: executable <memdump path> <kindle documents path> <output file> [<output k4i file(optional)>]" << std::endl;
         std::cout << "This program needs accress to Kindle dlls, so it is easiest to run it in the folder with kindle executable or copied dlls" << std::endl;
         std::cout << "Please ensure that KRFDynamic.dll is of the appropriate version (currently md5 22ccc712f186e3f03567e2bec2189d6a, kindle 2.7.1(70978))" << std::endl;
         return 1;
@@ -728,6 +797,13 @@ int main(int argc, char* argv[])
     std::string folder_path = argv[2];
     std::string out_path = argv[3];
     std::cout << folder_path << std:: endl;
+    std::string k4;
+    std::string* k4file = nullptr;
+    if (argc > 4)
+    {
+        k4 = argv[4];
+        k4file = &k4;
+    }
     //this is a bit dumb but I don't know of good ways of flipping between char types
     std::basic_string<TCHAR> wfolder_path = std::basic_string<wchar_t>(folder_path.begin(),folder_path.end());
     if (hinstLib)
@@ -772,7 +848,7 @@ int main(int argc, char* argv[])
 
         ///enumerate folder
         printf(("Trying to open  %s \n"), argv[1]);
-        enumerateKindleDir(wfolder_path.data(),out_path, serial_candidates, secret_candidates);
+        enumerateKindleDir(wfolder_path.data(),out_path, serial_candidates, secret_candidates,k4file);
     }
     else
     {

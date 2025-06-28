@@ -220,7 +220,7 @@ keynames = ['kindle.account.tokens','kindle.cookie.item','eulaVersionAccepted','
 def getK4Pids(rec209, token, kindleDatabase):
     global charMap1
     pids = []
-
+    #print(f"Entering getK4Pids with token {token} and kindleDatabase {kindleDatabase}")
     try:
         # Get the kindle account token, if present
         kindleAccountToken = bytearray.fromhex((kindleDatabase[1])['kindle.account.tokens'])
@@ -228,7 +228,10 @@ def getK4Pids(rec209, token, kindleDatabase):
     except KeyError:
         kindleAccountToken = b''
         pass
-
+    extraKindleTokens=kindleDatabase[1].get('kindle.account.secrets',[])
+    extraKindleTokens=[bytearray.fromhex(f) for f in extraKindleTokens]
+    extraKindleTokens.append(kindleAccountToken)
+    #extraKindleTokens=list(set(extraKindleTokens))
     try:
         # Get the DSN token, if present
         DSN = bytearray.fromhex((kindleDatabase[1])['DSN'])
@@ -270,36 +273,41 @@ def getK4Pids(rec209, token, kindleDatabase):
         DSN = encode(SHA1(MazamaRandomNumber+encodedIDString+encodedUsername),charMap1)
         #print "DSN",DSN.encode('hex')
         pass
-
+    extraDSNs=kindleDatabase[1].get('extra.dsns',[])
+    extraDSNs=[bytearray.fromhex(f) for f in extraDSNs]
+    extraDSNs.append(DSN)
     if rec209 is None:
-        pids.append(DSN+kindleAccountToken)
+        for DSN in extraDSNs:
+          for accToken in extraKindleTokens:
+            pids.append(DSN+accToken)
         return pids
 
     # Compute the device PID (for which I can tell, is used for nothing).
     table =  generatePidEncryptionTable()
-    devicePID = generateDevicePID(table,DSN,4)
-    devicePID = checksumPid(devicePID)
-    pids.append(devicePID)
+    for DSN in extraDSNs:
+      devicePID = generateDevicePID(table,DSN,4)
+      devicePID = checksumPid(devicePID)
+      pids.append(devicePID)
 
-    # Compute book PIDs
+      # Compute book PIDs
+      for accToken in extraKindleTokens:
+        # book pid
+        pidHash = SHA1(DSN+accToken+rec209+token)
+        bookPID = encodePID(pidHash)
+        bookPID = checksumPid(bookPID)
+        pids.append(bookPID)
 
-    # book pid
-    pidHash = SHA1(DSN+kindleAccountToken+rec209+token)
-    bookPID = encodePID(pidHash)
-    bookPID = checksumPid(bookPID)
-    pids.append(bookPID)
+        # variant 1
+        pidHash = SHA1(accToken+rec209+token)
+        bookPID = encodePID(pidHash)
+        bookPID = checksumPid(bookPID)
+        pids.append(bookPID)
 
-    # variant 1
-    pidHash = SHA1(kindleAccountToken+rec209+token)
-    bookPID = encodePID(pidHash)
-    bookPID = checksumPid(bookPID)
-    pids.append(bookPID)
-
-    # variant 2
-    pidHash = SHA1(DSN+rec209+token)
-    bookPID = encodePID(pidHash)
-    bookPID = checksumPid(bookPID)
-    pids.append(bookPID)
+      # variant 2
+      pidHash = SHA1(DSN+rec209+token)
+      bookPID = encodePID(pidHash)
+      bookPID = checksumPid(bookPID)
+      pids.append(bookPID)
 
     return pids
 
