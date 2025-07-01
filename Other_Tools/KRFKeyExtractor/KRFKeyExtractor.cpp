@@ -510,7 +510,7 @@ void enumerateKindleDir(const TCHAR* path,const std::string& outfile,std::set<st
                 }; break;
                 }
             }
-            if (kst > 0)
+            if (kst > 1)
             {
                 k4i << "]";
             }
