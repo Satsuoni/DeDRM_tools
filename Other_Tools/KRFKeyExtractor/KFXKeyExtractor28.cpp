@@ -1988,8 +1988,7 @@ int main(int argc, char* argv[])
 	
 	wchar_t kindle_local_path[MAX_PATH];
 	PathCombineW(kindle_local_path, localcappdata, amazon_app);
-	wchar_t kindle_global_path[MAX_PATH];
-	PathCombineW(kindle_global_path, programfiles, amazon_app);
+	
 	
 	
 	wchar_t kindle_path[MAX_PATH];
@@ -2003,8 +2002,20 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
-		PathCombineW(kindle_path, programfiles, L"Kindle.exe");
-		PathCombineW(qt_path, programfiles, L"Qt5Core.dll");
+        wchar_t kindle_global_path[MAX_PATH];
+        PathCombineW(kindle_global_path, programfiles, amazon_app);
+
+        amazon_app = L"Amazon\\Kindle\\application";
+
+		PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
+		PathCombineW(qt_path, kindle_global_path, L"Qt5Core.dll");
+        if (!PathFileExists(kindle_path))
+        {
+            PathCombineW(kindle_global_path, programfiles, L"Amazon\\Kindle\\");
+            PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
+            PathCombineW(qt_path, kindle_global_path, L"Qt5Core.dll");
+        }
+
 		std::cout<<"Kindle4PC appears to be installed globally, this is not tested and the utility might not work" << std::endl;
 	}
 	PathCombineW(kindle_storage, localcappdata, amazon_storage);

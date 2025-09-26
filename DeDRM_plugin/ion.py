@@ -1360,6 +1360,7 @@ class DrmIonVoucher(object):
         shared = ("PIDv3" + self.encalgorithm + self.enctransformation + self.hashalgorithm).encode('ASCII')
 
         self.lockparams.sort()
+        print("Lock parameters used: {}".format(self.lockparams))
         for param in self.lockparams:
             if param == "ACCOUNT_SECRET":
                 shared += param.encode('ASCII') + self.secret
@@ -1379,7 +1380,6 @@ class DrmIonVoucher(object):
         lastexception = None # type: Exception | None
         keycandidates=self.keycandidates+[hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
         for key in keycandidates:
-            print(f"{key.hex()} {self.cipheriv[:16].hex()}")
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:
                 b = aes.decrypt(self.ciphertext)
