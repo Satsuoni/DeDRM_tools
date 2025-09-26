@@ -1956,7 +1956,7 @@ int main(int argc, char* argv[])
     {
         std::cout << "Usage: executable <kindle documents path (with _EBOK folders)> <output file> <output k4i file>" << std::endl;
         std::cout << "This program searches for Kindle executable in standard locations, run it from wherever, but it prefers Kindle installations in local folder (%APPDATA%/Local/Amazon/Kindle)" << std::endl;
-        std::cout << "Please ensure that KRFDynamic.dll is of the appropriate version (currently md5 93fce0fedb6cd17514f9a72f963dbdba, kindle 2.8.0(70980))" << std::endl;
+        std::cout << "Please ensure that Kindle.exe is of the appropriate version (currently md5 93fce0fedb6cd17514f9a72f963dbdba, kindle 2.8.0(70980))" << std::endl;
         std::cout << "In case Kindle version does not match, it would crash" << std::endl;
         std::cout << "Note: to get proper values into k4i file, at least one KFX book that uses account secrets should be downloaded. If resulting k4i has no tokens set, try downloading some free books." << std::endl;
         std::cout << "Note 2: this utility creates a temporary /storage folder in %APPDATA%/Local. It can be deleted after use. " << std::endl;
