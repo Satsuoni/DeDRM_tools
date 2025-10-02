@@ -1143,7 +1143,22 @@ struct IATRESULTS
 
 	std::vector<MODULEINFO> modules;
 };
+wchar_t* main_path = nullptr;
+std::string WcharToUtf8(const WCHAR* wideString, size_t length)
+{
+    if (length == 0)
+        length = wcslen(wideString);
 
+    if (length == 0)
+        return std::string();
+
+    std::string convertedString(WideCharToMultiByte(CP_UTF8, 0, wideString, (int)length, NULL, 0, NULL, NULL), 0);
+
+    WideCharToMultiByte(
+        CP_UTF8, 0, wideString, (int)length, &convertedString[0], (int)convertedString.size(), NULL, NULL);
+
+    return convertedString;
+}
 void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& seek)
 {
 	// Get IAT size
@@ -1163,11 +1178,24 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
 
 		m.name = pszModName;
 
-		HINSTANCE hImportDLL = LoadLibraryA(pszModName);
+        HINSTANCE hImportDLL;
+        if(main_path==nullptr)
+            hImportDLL = LoadLibraryA(pszModName);
+        else
+        {
+            std::string pth = WcharToUtf8(main_path,0) + "\\"+std::string(pszModName);
+            //std::cout << "Loading path " << pth <<std::endl;
+            hImportDLL = LoadLibraryA(pth.c_str());
+            if (!hImportDLL)
+                hImportDLL = LoadLibraryA(pszModName);
+            //else 
+             //   std::cout << "Loaded " << pszModName << std::endl;
+        }
 		if (!hImportDLL)
 		{
 			m.f = IATRESULTS::FAILUREREASON::NOTFOUND;
 			res.modules.push_back(m);
+            std::cout << "Could not load DLL " << pszModName << " with error "<< GetLastError() << ", please check your paths" << std::endl;
 			continue;
 		}
 		m.handle = hImportDLL;
@@ -1994,11 +2022,12 @@ int main(int argc, char* argv[])
 	wchar_t kindle_path[MAX_PATH];
 	wchar_t qt_path[MAX_PATH];
 	wchar_t kindle_storage[MAX_PATH];
-
+    main_path = kindle_local_path;
 	if (PathFileExists(kindle_local_path))
 	{
 		PathCombineW(kindle_path, kindle_local_path, L"Kindle.exe");
 		PathCombineW(qt_path, kindle_local_path, L"Qt5Core.dll");
+        main_path = kindle_local_path;
 	}
 	else
 	{
@@ -2009,15 +2038,19 @@ int main(int argc, char* argv[])
 
 		PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
 		PathCombineW(qt_path, kindle_global_path, L"Qt5Core.dll");
+        main_path = kindle_global_path;
         if (!PathFileExists(kindle_path))
         {
             PathCombineW(kindle_global_path, programfiles, L"Amazon\\Kindle\\");
             PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
             PathCombineW(qt_path, kindle_global_path, L"Qt5Core.dll");
+            main_path = kindle_global_path;
         }
 
 		std::cout<<"Kindle4PC appears to be installed globally, this is not tested and the utility might not work" << std::endl;
 	}
+    std::wcout << "adding search dir " << main_path << std::endl;
+    SetDllDirectory(main_path);
 	PathCombineW(kindle_storage, localcappdata, amazon_storage);
 	if (!PathFileExists(kindle_storage))
 	{
@@ -2063,19 +2096,33 @@ int main(int argc, char* argv[])
 	fromQString fromQ = (fromQString)GetProcAddress(qtlib, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
 	int cc = (int)GetProcAddress(kindle, ("??0Analyzer@Lucene@@QAE@ABV01@@Z"));
 	stoffset = cc - luceneaddr;
+    printf("Got offset: %x\n",stoffset);
 	_initterm_e((_PIFV*)(stoffset + initterm_e_start), (_PIFV*)(stoffset + initterm_e_end));
+    //printf("Initialized exceptions \n");
+
     //flip tlls initialized flag
 	ipcall tlsset = (ipcall)(stoffset + tls_reset);
 	int rt = 1;
 	//need to reset tls flag so that static vars would initialize, i think
 	tlsset(&rt);
+    //printf("Flipped tls \n");
+
 	//init global/static vars
-	_initterm((_PVFV*)(stoffset + initterm_start), (_PVFV*)(stoffset + initterm_end));
+    _PVFV* ppfn = (_PVFV*)(stoffset + initterm_start);
+    _PVFV* ppend = (_PVFV*)(stoffset + initterm_end);
+    do {
+        if (_PVFV pfn = *++ppfn) {
+            //printf("Running initializer %x\n",(int)pfn-stoffset);
+            pfn();
+        }
+    } while (ppfn < ppend);
+	//_initterm((_PVFV*)(stoffset + initterm_start), (_PVFV*)(stoffset + initterm_end));
+    //printf("Initialized globals \n");
 	std::string tokens = std::string("kindle.account.tokens");
 	std::string dsn = std::string("DSN");
 	vpcall MakeKindleInfoStorage = (vpcall)(stoffset + make_storage);
 	void* kinfo = MakeKindleInfoStorage();
-
+    //printf("Opened storage %p\n", kinfo);
 	//note: QStrings are not destroyed, so there is some leak, but we don't care
 	getme getVal = (getme)(stoffset + get_storage_value);
 	char qtokens[256];
@@ -2084,14 +2131,15 @@ int main(int argc, char* argv[])
 	void* dsnz = toQ(qdsn, dsn); //std::string("kindle.account.tokens"));
 	char qstbufout[256];
 	void* nretout = toQ(qstbufout, std::string(""));
-	getVal(kinfo, nretout, tknz);
-	std::string out_tokens = "fdf";
+	//getVal(kinfo, nretout, tknz);
+   std::string out_tokens = "fdf";
 	std::string out_dsn = "sds";
 	getVal(kinfo, nretout, tknz);
 	fromQ(nretout, out_tokens);
+    //printf("Got tokens\n");
 	getVal(kinfo, nretout, dsnz);
 	fromQ(nretout, out_dsn);
-
+    //printf("Got dsn\n");
 	std::cout << "DSN " << out_dsn << std::endl;
 	std::cout << "Tokens " << out_tokens << std::endl;
 	if (out_dsn.empty())
