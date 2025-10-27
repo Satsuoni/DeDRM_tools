@@ -1115,7 +1115,7 @@ int finIndexIn(const std::vector<std::string>& p, const std::string& val)
 }
 
 //--------------------------------------------------end ION
-
+HINSTANCE qtlib = nullptr;
 
 
 struct IATRESULTS
@@ -1190,6 +1190,10 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
                 hImportDLL = LoadLibraryA(pszModName);
             //else 
              //   std::cout << "Loaded " << pszModName << std::endl;
+        }
+        if (std::string(pszModName)=="Qt5Core.dll")
+        {
+            qtlib = hImportDLL;// LoadLibrary(qt_path);
         }
 		if (!hImportDLL)
 		{
@@ -1787,19 +1791,23 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outfile, std::set<
             std::cout << "Writing DSN and secrets into " << *k4ifile << std::endl;
             nlohmann::json jsn= nlohmann::json();
             int cnt = 0;
+
             for (auto& serial : working_serials)
             {
                 if (cnt < 1)
                 {
-                    jsn["DSN"] = serial;
+                    jsn["DSN"] = hexhex(serial);
+                    jsn["DSN_clear"] = serial;
                 }
                 else
                 {
                     if (!jsn.contains("extra.dsns"))
                     {
                         jsn["extra.dsns"] = nlohmann::json::array();
+                        jsn["extra.dsns_clear"] = nlohmann::json::array();
                     }
-                    jsn["extra.dsns"].push_back(serial);
+                    jsn["extra.dsns"].push_back(hexhex(serial));
+                    jsn["extra.dsns_clear"].push_back(serial);
                 }
                 cnt++;
             }
@@ -1913,7 +1921,7 @@ void pfree(void* p)
         uint8_t* pp=(uint8_t*)p;
         char* pc = (char*)p;
         BinaryIonParser bp(&pp[16], 2000, TID_TYPEDECL);
-        //std::cout << hexStr((uint8_t*)p, 64) << std::endl;
+        //std::cout << hexStr((uint8_t*)p, 128) << std::endl;
         if (bp.hasnext())
         {
             int nxt = bp.next();
@@ -1922,9 +1930,9 @@ void pfree(void* p)
                 if (bp.annotations[0] == keysetIndex)
                 {
                     //valuefieldid
-
                     //std::cout << "Correct: " << hexStr((uint8_t*)addr, 16) << std::endl;
                     tryAssignKey(&bp);
+                   // while (true) {}
                 }
 
             }
@@ -1943,7 +1951,8 @@ void pfree(void* p)
             }
             if (!brk && pc[41] == 0)
             {
-                //std::cout << "secrets " << std::string(pc) << std::endl;
+                std::cout << "secrets " << std::string(pc) << std::endl;
+                
                 keydataAccumulator.old_secrets.insert(std::string(pc));
             }
         }
@@ -1968,6 +1977,7 @@ std::list<std::string> splitStringBySubstring(const std::string& str, const std:
 
 	return result;
 }
+
 
 
 
@@ -2015,15 +2025,19 @@ int main(int argc, char* argv[])
 	}
 	
 	wchar_t kindle_local_path[MAX_PATH];
+    wchar_t kindle_global_path[MAX_PATH];
 	PathCombineW(kindle_local_path, localcappdata, amazon_app);
-	
-	
-	
+    PathCombineW(kindle_global_path, programfiles, L"Amazon\\Kindle\\");
+    wchar_t exe_local [MAX_PATH] ;
+    wchar_t exe_global[MAX_PATH];
+    PathCombineW(exe_local, kindle_local_path, L"Kindle.exe");
+    PathCombineW(exe_global, kindle_global_path, L"Kindle.exe");
+
 	wchar_t kindle_path[MAX_PATH];
 	wchar_t qt_path[MAX_PATH];
 	wchar_t kindle_storage[MAX_PATH];
     main_path = kindle_local_path;
-	if (PathFileExists(kindle_local_path))
+	if (PathFileExists(exe_local))
 	{
 		PathCombineW(kindle_path, kindle_local_path, L"Kindle.exe");
 		PathCombineW(qt_path, kindle_local_path, L"Qt5Core.dll");
@@ -2031,23 +2045,27 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
-        wchar_t kindle_global_path[MAX_PATH];
-        PathCombineW(kindle_global_path, programfiles, amazon_app);
-
-        amazon_app = L"Amazon\\Kindle\\application";
-
-		PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
-		PathCombineW(qt_path, kindle_global_path, L"Qt5Core.dll");
-        main_path = kindle_global_path;
-        if (!PathFileExists(kindle_path))
+        if (PathFileExists(exe_global))
         {
-            PathCombineW(kindle_global_path, programfiles, L"Amazon\\Kindle\\");
             PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
             PathCombineW(qt_path, kindle_global_path, L"Qt5Core.dll");
             main_path = kindle_global_path;
-        }
+            if (!PathFileExists(kindle_path))
+            {
+                PathCombineW(kindle_global_path, programfiles, L"Amazon\\Kindle\\");
+                PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
+                PathCombineW(qt_path, kindle_global_path, L"Qt5Core.dll");
+                main_path = kindle_global_path;
+            }
 
-		std::cout<<"Kindle4PC appears to be installed globally, this is not tested and the utility might not work" << std::endl;
+            std::cout << "Kindle4PC appears to be installed globally, this is not tested and the utility might not work" << std::endl;
+        }
+        else
+        {
+            std::wcout << L"Kindle.exe not found in " << exe_local << L" or " << exe_global << std::endl;
+            return 1;
+        }
+	
 	}
     std::wcout << "adding search dir " << main_path << std::endl;
     SetDllDirectory(main_path);
@@ -2086,7 +2104,7 @@ int main(int argc, char* argv[])
 	std::map<FARPROC, FARPROC> repls;
 	repls[(FARPROC)&free] = (FARPROC)&pfree;
 	ParseIAT(kindle, res, repls);
-	HINSTANCE qtlib = LoadLibrary(qt_path);
+	
 	if (qtlib == nullptr)
 	{
 		std::cerr << "Error loading qt " << GetLastErrorAsString() << std::endl;
@@ -2165,6 +2183,6 @@ int main(int argc, char* argv[])
     
 
     std::basic_string<TCHAR> wfolder_path = std::basic_string<wchar_t>(folder_path.begin(), folder_path.end());// L".\\";
-
+   
     enumerateKindleDir(wfolder_path.data(), out_path, &serial_candidates, &secret_candidates,k4file);
 }

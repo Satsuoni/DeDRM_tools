@@ -216,7 +216,11 @@ def getKindlePids(rec209, token, serialnum):
 # parse the Kindleinfo file to calculate the book pid.
 
 keynames = ['kindle.account.tokens','kindle.cookie.item','eulaVersionAccepted','login_date','kindle.token.item','login','kindle.key.item','kindle.name.info','kindle.device.info', 'MazamaRandomNumber']
-
+def maybeUnhex(dat):
+  try:
+    return bytearray.fromhex(dat)
+  except ValueError:
+    return bytearray(dat.encode("utf8"))
 def getK4Pids(rec209, token, kindleDatabase):
     global charMap1
     pids = []
@@ -234,7 +238,7 @@ def getK4Pids(rec209, token, kindleDatabase):
     #extraKindleTokens=list(set(extraKindleTokens))
     try:
         # Get the DSN token, if present
-        DSN = bytearray.fromhex((kindleDatabase[1])['DSN'])
+        DSN = maybeUnhex((kindleDatabase[1])['DSN'])
         print("Got DSN key from database {0}".format(kindleDatabase[0]))
     except KeyError:
         # See if we have the info to generate the DSN
@@ -274,7 +278,7 @@ def getK4Pids(rec209, token, kindleDatabase):
         #print "DSN",DSN.encode('hex')
         pass
     extraDSNs=kindleDatabase[1].get('extra.dsns',[])
-    extraDSNs=[bytearray.fromhex(f) for f in extraDSNs]
+    extraDSNs=[maybeUnhex(f) for f in extraDSNs]
     extraDSNs.append(DSN)
     if rec209 is None:
         for DSN in extraDSNs:
