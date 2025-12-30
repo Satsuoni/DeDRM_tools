@@ -52,13 +52,14 @@
 #   10.0.0 - Add support for "hardened" Adobe DRM (RMSDK >= 10)
 #   10.0.2 - Fix some Python2 stuff
 #   10.0.4 - Fix more Python2 stuff
+#   10.0.5 - modified PDFStream object to decrypt included dictionary
 
 """
 Decrypts Adobe ADEPT-encrypted PDF files.
 """
 
 __license__ = 'GPL v3'
-__version__ = "10.0.4"
+__version__ = "10.0.5"
 
 import codecs
 import hashlib
