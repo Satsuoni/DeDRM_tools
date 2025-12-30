@@ -931,13 +931,15 @@ class PDFStream(PDFObject):
                    (self.objid, len(self.data), self.dic)
 
     def decode(self):
-        assert self.data is None and self.rawdata is not None
+        assert self.data is None and self.rawdata is not None and self.dic is not None
         data = self.rawdata
         if self.decipher:
             # Handle encryption
             data = self.decipher(self.objid, self.genno, data)
+            dic = decipher_all(self.decipher, self.objid, self.genno, self.dic)
             if gen_xref_stm:
                 self.decdata = data # keep decrypted data
+                self.decdic = dic # keep decrypted dic
         if 'Filter' not in self.dic:
             self.data = data
             self.rawdata = None
@@ -1008,7 +1010,15 @@ class PDFStream(PDFObject):
             # Handle encryption
             data = self.decipher(self.objid, self.genno, data)
         return data
-
+    
+    def get_decdic(self):
+        if self.decdic is not None:
+            return self.decdic
+        dic = self.dic
+        if self.decipher and dic:
+            # Handle encryption
+            dic = decipher_all(self.decipher, self.objid, self.genno, dic)
+        return dic
 
 ##  PDF Exceptions
 ##
@@ -2304,6 +2314,7 @@ class PDFSerializer(object):
                 self.write(b'(deleted)')
             else:
                 data = obj.get_decdata()
+                dic = obj.get_decdic()
 
                 # Fix length:
                 # We've decompressed and then recompressed the PDF stream.
@@ -2314,11 +2325,11 @@ class PDFSerializer(object):
                 # Without this change, all PDFs exported by this plugin are slightly corrupted - 
                 # even though most if not all PDF readers can correct that on-the-fly.
 
-                if 'Length' in obj.dic: 
-                    obj.dic['Length'] = len(data)
+                if 'Length' in dic: 
+                    dic['Length'] = len(data)
 
 
-                self.serialize_object(obj.dic)
+                self.serialize_object(dic)
                 self.write(b'stream\n')
                 self.write(data)
                 self.write(b'\nendstream')
