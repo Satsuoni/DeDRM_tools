@@ -914,6 +914,7 @@ class PDFStream(PDFObject):
         self.decipher = decipher
         self.data = None
         self.decdata = None
+        self.decdic = None
         self.objid = None
         self.genno = None
         return
