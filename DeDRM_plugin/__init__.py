@@ -5,7 +5,8 @@ from __future__ import print_function
 
 # __init__.py for DeDRM_plugin
 # Copyright © 2008-2020 Apprentice Harper et al.
-# Copyright © 2021-2023 NoDRM
+# Copyright © 2021-2024 NoDRM
+# Copyright © 2025-2026 冊鬼
 
 __license__   = 'GPL v3'
 __docformat__ = 'restructuredtext en'
@@ -151,7 +152,7 @@ class DeDRM(FileTypePlugin):
     name                    = PLUGIN_NAME
     description             = "Removes DRM from Adobe Adept (including Kobo), Barnes & Noble, Amazon Kindle, Mobipocket and eReader ebooks. Credit given to i♥cabbages and The Dark Reverser for the original stand-alone scripts."
     supported_platforms     = ['linux', 'osx', 'windows']
-    author                  = "Apprentice Alf, Apprentice Harper, NoDRM, The Dark Reverser and i♥cabbages"
+    author                  = "冊鬼, Apprentice Alf, Apprentice Harper, NoDRM, The Dark Reverser and i♥cabbages"
     version                 = PLUGIN_VERSION_TUPLE
     #minimum_calibre_version = (5, 0, 0)  # Python 3.
     minimum_calibre_version = (2, 0, 0)  # Needs Calibre 1.0 minimum. 1.X untested.
