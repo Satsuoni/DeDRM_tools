@@ -150,7 +150,7 @@ PLUGIN_VERSION_TUPLE = __version.PLUGIN_VERSION_TUPLE
 
 class DeDRM(FileTypePlugin):
     name                    = PLUGIN_NAME
-    description             = "Removes DRM from Adobe Adept (including Kobo), Barnes & Noble, Amazon Kindle, Mobipocket and eReader ebooks. Credit given to i♥cabbages and The Dark Reverser for the original stand-alone scripts."
+    description             = "Removes DRM from Adobe ADEPT (including Rakuten Kobo), Barnes & Noble, Amazon Kindle, Mobipocket and eReader ebooks. Credit given to i♥cabbages and The Dark Reverser for the original stand-alone scripts."
     supported_platforms     = ['linux', 'osx', 'windows']
     author                  = "冊鬼, Apprentice Alf, Apprentice Harper, NoDRM, The Dark Reverser and i♥cabbages"
     version                 = PLUGIN_VERSION_TUPLE
