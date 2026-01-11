@@ -906,8 +906,8 @@ struct BinaryIonParser
         }
         if (table.name != "-")
         {
-            symbols.import_(table.symnames, min(maxid, table.symnames.size()));
-            if (table.symnames.size() < maxid)
+            symbols.import_(table.symnames, min((size_t)maxid, table.symnames.size()));
+            if (table.symnames.size() < (size_t)maxid)
             {
                 symbols.importunknown(name + "-unknown", maxid - table.symnames.size());
             }
@@ -1159,7 +1159,7 @@ std::string WcharToUtf8(const WCHAR* wideString, size_t length)
 
     return convertedString;
 }
-void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& seek)
+void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& seek, const std::map<std::string, FARPROC>& seekName)
 {
 	// Get IAT size
 	DWORD ulsize = 0;
@@ -1267,13 +1267,23 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
 				if (!fName)
 					break;
 				fu.name = fName;
+                
+
 				pfnNew = GetProcAddress(hImportDLL, fName);
+               // std::cout << "Func " << fName << "  " << pfnNew <<std::endl;
 				if (!pfnNew)
 				{
 					fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
 					m.functions.push_back(fu);
 					continue;
 				}
+                auto fs = seekName.find(std::string(fName));
+                if (fs != seekName.end())
+                {
+
+                    pfnNew = fs->second;
+                    printf("Found sought after function by name \n");
+                }
 			}
 
 			// Patch it now...
@@ -1913,24 +1923,62 @@ void tryAssignKey(BinaryIonParser* drmkey)
 
 }
 
+
+void pmemset(void* p,int v, size_t s)
+{
+    if(armed&&s>0)
+    {
+      armed = false;
+      std::cout<<"Memset of "<<s<<" :  "  << hexStr((uint8_t*)p, s) << std::endl;
+      armed = true;
+    }
+    memset(p, v, s);
+}
+void pmemcpy(void* p, const void * d, size_t s)
+{
+    if (armed && s > 0)
+    {
+        armed = false;
+
+      //  std::cout << "Memcpy of " << s << " :  " << hexStr((uint8_t*)p, s) << std::endl;
+        armed = true;
+    }
+    memcpy(p, d, s);
+}
+std::map<void*, size_t> sizes;
+void* pmalloc(size_t sz)
+{
+    void* dat = malloc(sz);
+    if (armed)
+    {
+       // printf("Allocating %p %lu\n", dat, sz);
+        
+        sizes[dat] = sz;
+    }
+    return dat;
+}
 void pfree(void* p)
 {
-
-    if (armed&&p!=nullptr)//armed&&
+    /*if (armed)
+    {
+       printf("Freeing %p %lu\n",p,sizes[p]);
+    }*/
+  
+    if (armed&&p!=nullptr&&sizes[p]>1000)
     {
         uint8_t* pp=(uint8_t*)p;
         char* pc = (char*)p;
-        BinaryIonParser bp(&pp[16], 2000, TID_TYPEDECL);
-        //std::cout << hexStr((uint8_t*)p, 128) << std::endl;
+        BinaryIonParser bp(&pp[16], sizes[p]-16, TID_TYPEDECL);
+        //std::cout << hexStr((uint8_t*)&pp[16], sizes[p]-16) << std::endl;
         if (bp.hasnext())
         {
             int nxt = bp.next();
             if (nxt == TID_LIST)
             {
-                if (bp.annotations[0] == keysetIndex)
+                if (bp.annotations.size()>0&& bp.annotations[0] == keysetIndex)
                 {
                     //valuefieldid
-                    //std::cout << "Correct: " << hexStr((uint8_t*)addr, 16) << std::endl;
+                    //std::cout << "Correct: " << hexStr((uint8_t*)&pp[16], 16) << std::endl;
                     tryAssignKey(&bp);
                    // while (true) {}
                 }
@@ -1956,7 +2004,7 @@ void pfree(void* p)
                 keydataAccumulator.old_secrets.insert(std::string(pc));
             }
         }
-        
+        sizes.erase(p);
     }
     free(p);
 }
@@ -2103,7 +2151,12 @@ int main(int argc, char* argv[])
 	IATRESULTS res;
 	std::map<FARPROC, FARPROC> repls;
 	repls[(FARPROC)&free] = (FARPROC)&pfree;
-	ParseIAT(kindle, res, repls);
+    repls[(FARPROC)&malloc] = (FARPROC)&pmalloc;
+    std::cout << "Memset " << &memset << std::endl;
+    //repls[(FARPROC)&memset] = (FARPROC)&pmemset;
+    std::map<std::string, FARPROC> replsName;
+    //replsName["memset"]= (FARPROC)&pmemset;
+	ParseIAT(kindle, res, repls, replsName);
 	
 	if (qtlib == nullptr)
 	{
@@ -2180,6 +2233,7 @@ int main(int argc, char* argv[])
     {
        secret_candidates.insert(val);
     }
+   // 
     
 
     std::basic_string<TCHAR> wfolder_path = std::basic_string<wchar_t>(folder_path.begin(), folder_path.end());// L".\\";
