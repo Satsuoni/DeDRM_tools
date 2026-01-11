@@ -140,7 +140,7 @@ def unescape(text):
         return text # leave as is
     return re.sub("&#?\\w+;", fixup, text)
 
-def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime = time.time(),skeyfile=None):
+def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime = time.time(),skeyfile=None, remove_watermarks=True):
     # handle the obvious cases at the beginning
     if not os.path.isfile(infile):
         raise DrmException("Input file does not exist.")
@@ -157,7 +157,7 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
     if magic8[:4] == b'PK\x03\x04':
         mb = kfxdedrm.KFXZipBook(infile,skeyfile)
     elif mobi:
-        mb = mobidedrm.MobiBook(infile)
+        mb = mobidedrm.MobiBook(infile, remove_watermarks)
     else:
         mb = topazextract.TopazBook(infile)
 

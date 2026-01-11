@@ -927,7 +927,7 @@ class DeDRM(FileTypePlugin):
         kindleDatabases = list(dedrmprefs['kindlekeys'].items())
 
         try:
-            book = k4mobidedrm.GetDecryptedBook(path_to_ebook,kindleDatabases,androidFiles,serials,pids,self.starttime,dedrmprefs["kindleextrakeyfile"])
+            book = k4mobidedrm.GetDecryptedBook(path_to_ebook,kindleDatabases,androidFiles,serials,pids,self.starttime,dedrmprefs["kindleextrakeyfile"], dedrmprefs["remove_watermarks"])
         except Exception as e:
             decoded = False
             # perhaps we need to get a new default Kindle for Mac/PC key

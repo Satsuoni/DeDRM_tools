@@ -175,7 +175,7 @@ class MobiBook:
         # to match function in Topaz book
         pass
 
-    def __init__(self, infile):
+    def __init__(self, infile, remove_watermarks=True):
         print("MobiDeDrm v{0:s}.\nCopyright © 2008-2022 The Dark Reverser, Apprentice Harper et al.".format(__version__))
 
         # initial sanity check on file
@@ -250,7 +250,7 @@ class MobiBook:
                     elif type == 406 and size == 16:
                         # remove rental due date
                         self.patchSection(0, b'\0'*8, 16 + self.mobi_length + pos + 8)
-                    elif type == 208:
+                    elif type == 208 and remove_watermarks:
                         # remove watermark (atv:kin: stuff)
                         self.patchSection(0, b'\0'*(size-8), 16 + self.mobi_length + pos + 8)
                     # print type, size, content, content.encode('hex')
