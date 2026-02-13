@@ -23,20 +23,115 @@
 #pragma comment(lib, "Shlwapi.lib")
 
 int stoffset = 0; //global base offset for loaded library
-const int luceneaddr = 0x01705150;
-const int initterm_e_start = 0x02c8f6ec;
-const int initterm_e_end= 0x02c8f704;
-const int tls_reset = 0x026d943f;
-const int initterm_start = 0x2c4c138;
-const int initterm_end = 0x2c8f6e8;
-const int make_storage = 0x013b5430;
-const int get_storage_value = 0x004bc400; //storageTable#3
-const int get_plugin_man = 0x17f23f0;
-const int load_all = 0x017f24f0;
-const int get_factory = 0x017f1970;
-const int open_book = 0x017f1ad0;
-const int drm_provider = 0x017f1e10;
 
+struct ExecOffsets
+{
+     int luceneaddr =0;
+     int initterm_e_start = 0;
+     int initterm_e_end = 0;
+     int tls_reset = 0;
+     int initterm_start = 0;
+     int initterm_end = 0;
+     int make_storage = 0;
+     int get_storage_value = 0; //storageTable#3 - to check
+     int get_plugin_man = 0;
+     int load_all = 0;
+     int get_factory = 0;
+     int open_book = 0;
+     int drm_provider = 0;
+     int mem_offset = 0;
+     std::string version="";
+};
+
+ExecOffsets curOffs;
+ExecOffsets Kindle282()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x016cdc20;
+    ret.initterm_e_start = 0x002ad66f8;
+    ret.initterm_e_end = 0x002ad6710;
+    ret.tls_reset = 0x0252be9f;
+    ret.initterm_start = 0x2a93158;
+    ret.initterm_end = 0x02ad66f4;
+    ret.make_storage = 0x00137deb0;
+    ret.get_storage_value = 0x004b8c80; 
+    ret.get_plugin_man = 0x017baf60;
+    ret.load_all = 0x0017bb060;
+    ret.get_factory = 0x17ba4e0;
+    ret.open_book = 0x17ba640;
+    ret.drm_provider = 0x017ba980;
+    ret.mem_offset = 20;
+    ret.version = "Kindle 2.8.2(70987)";
+    return ret;
+}
+
+ExecOffsets Kindle281()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x0016fe420;
+    ret.initterm_e_start = 0x02b016dc;
+    ret.initterm_e_end = 0x0002b016f4;
+    ret.tls_reset = 0x0255747f;
+    ret.initterm_start = 0x2abe150;
+    ret.initterm_end = 0x02b016d8;
+    ret.make_storage = 0x013ae590;
+    ret.get_storage_value = 0x0004bc400; 
+    ret.get_plugin_man = 0x0017eb760;
+    ret.load_all = 0x017eb860;
+
+    ret.get_factory = 0x017eace0;
+    ret.open_book = 0x17eae40;
+    ret.drm_provider = 0x0017eb180;
+    ret.mem_offset = 20;
+    ret.version = "Kindle 2.8.1(70985)";
+    return ret;
+}
+
+ExecOffsets Kindle280()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x01705150;
+    ret.initterm_e_start = 0x02c8f6ec;
+    ret.initterm_e_end = 0x02c8f704;
+    ret.tls_reset = 0x026d943f;
+    ret.initterm_start = 0x2c4c138;
+    ret.initterm_end = 0x2c8f6e8;
+    ret.make_storage = 0x013b5430;
+    ret.get_storage_value = 0x004bc400; 
+    ret.get_plugin_man = 0x17f23f0;
+    ret.load_all = 0x017f24f0;
+    ret.get_factory = 0x017f1970;
+    ret.open_book = 0x017f1ad0;
+    ret.drm_provider = 0x017f1e10;
+    ret.mem_offset = 16;
+    ret.version = "Kindle 2.8.0(70980)";
+    return ret;
+}
+const int knum = 3;
+ExecOffsets kindles[knum] = { Kindle280(),Kindle281(),Kindle282()};
+bool checkExecs(int luceneAddr, const ExecOffsets& offs)
+{
+    int diff = luceneAddr - offs.luceneaddr;
+    /*printf("Lucene %02X\n", *(unsigned char*)(luceneAddr));
+    printf("TLS Reset %02X\n", *(unsigned char*)(diff + offs.tls_reset));
+
+    printf("make_storage %02X\n", *(unsigned char*)(diff + offs.make_storage));
+    printf("get_storage_value %02X\n", *(unsigned char*)(diff + offs.get_storage_value));
+    printf("get_plugin_man %02X\n", *(unsigned char*)(diff + offs.get_plugin_man));
+    printf("load_all %02X\n", *(unsigned char*)(diff + offs.load_all));
+    printf("get_factory %02X\n", *(unsigned char*)(diff + offs.get_factory));
+    printf("open_book %02X\n", *(unsigned char*)(diff + offs.open_book));
+    printf("drm_provider %02X\n", *(unsigned char*)(diff + offs.drm_provider));*/
+    if (*(unsigned char*)(diff + offs.tls_reset) != 0x55) return false;
+    if (*(unsigned char*)(diff + offs.make_storage) != 0x55) return false;
+    if (*(unsigned char*)(diff + offs.get_storage_value) != 0x55) return false;
+    if (*(unsigned char*)(diff + offs.get_plugin_man) != 0x55) return false;
+    if (*(unsigned char*)(diff + offs.load_all) != 0x8b) return false;
+    if (*(unsigned char*)(diff + offs.get_factory) != 0x55) return false;
+    if (*(unsigned char*)(diff + offs.open_book) != 0x55) return false;
+    if (*(unsigned char*)(diff + offs.drm_provider) != 0x55) return false;
+    return true;
+}
 
 static std::string hexStr(const uint8_t* data, int len)
 {
@@ -902,7 +997,7 @@ struct BinaryIonParser
                 readerr = true;
                 return;
             }
-            maxid = (int) table.symnames.size();
+            maxid = (int)table.symnames.size();
         }
         if (table.name != "-")
         {
@@ -1120,28 +1215,28 @@ HINSTANCE qtlib = nullptr;
 
 struct IATRESULTS
 {
-	enum class FAILUREREASON
-	{
-		SUCCESS = 0,
-		OTHER = 1,
-		NOTFOUND = 2,
-		CANNOTPATCH = 3,
-	};
-	struct FUNCTIONINFO
-	{
-		std::string name;
-		size_t ord = 0;
-		FAILUREREASON f = FAILUREREASON::SUCCESS;
-	};
-	struct MODULEINFO
-	{
-		std::string name;
-		HINSTANCE handle = 0;
-		FAILUREREASON f = FAILUREREASON::SUCCESS;
-		std::vector<FUNCTIONINFO> functions;
-	};
+    enum class FAILUREREASON
+    {
+        SUCCESS = 0,
+        OTHER = 1,
+        NOTFOUND = 2,
+        CANNOTPATCH = 3,
+    };
+    struct FUNCTIONINFO
+    {
+        std::string name;
+        size_t ord = 0;
+        FAILUREREASON f = FAILUREREASON::SUCCESS;
+    };
+    struct MODULEINFO
+    {
+        std::string name;
+        HINSTANCE handle = 0;
+        FAILUREREASON f = FAILUREREASON::SUCCESS;
+        std::vector<FUNCTIONINFO> functions;
+    };
 
-	std::vector<MODULEINFO> modules;
+    std::vector<MODULEINFO> modules;
 };
 wchar_t* main_path = nullptr;
 std::string WcharToUtf8(const WCHAR* wideString, size_t length)
@@ -1161,29 +1256,29 @@ std::string WcharToUtf8(const WCHAR* wideString, size_t length)
 }
 void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& seek, const std::map<std::string, FARPROC>& seekName)
 {
-	// Get IAT size
-	DWORD ulsize = 0;
-	PIMAGE_IMPORT_DESCRIPTOR pImportDesc = (PIMAGE_IMPORT_DESCRIPTOR)ImageDirectoryEntryToData(h, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &ulsize);
-	if (!pImportDesc)
-		return;
+    // Get IAT size
+    DWORD ulsize = 0;
+    PIMAGE_IMPORT_DESCRIPTOR pImportDesc = (PIMAGE_IMPORT_DESCRIPTOR)ImageDirectoryEntryToData(h, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &ulsize);
+    if (!pImportDesc)
+        return;
 
-	// Loop names
-	for (; pImportDesc->Name; pImportDesc++)
-	{
-		PSTR pszModName = (PSTR)((PBYTE)h + pImportDesc->Name);
-		if (!pszModName)
-			break;
+    // Loop names
+    for (; pImportDesc->Name; pImportDesc++)
+    {
+        PSTR pszModName = (PSTR)((PBYTE)h + pImportDesc->Name);
+        if (!pszModName)
+            break;
 
-		IATRESULTS::MODULEINFO m;
+        IATRESULTS::MODULEINFO m;
 
-		m.name = pszModName;
+        m.name = pszModName;
 
         HINSTANCE hImportDLL;
-        if(main_path==nullptr)
+        if (main_path == nullptr)
             hImportDLL = LoadLibraryA(pszModName);
         else
         {
-            std::string pth = WcharToUtf8(main_path,0) + "\\"+std::string(pszModName);
+            std::string pth = WcharToUtf8(main_path, 0) + "\\" + std::string(pszModName);
             //std::cout << "Loading path " << pth <<std::endl;
             hImportDLL = LoadLibraryA(pth.c_str());
             if (!hImportDLL)
@@ -1191,92 +1286,92 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
             //else 
              //   std::cout << "Loaded " << pszModName << std::endl;
         }
-        if (std::string(pszModName)=="Qt5Core.dll")
+        if (std::string(pszModName) == "Qt5Core.dll")
         {
             qtlib = hImportDLL;// LoadLibrary(qt_path);
         }
-		if (!hImportDLL)
-		{
-			m.f = IATRESULTS::FAILUREREASON::NOTFOUND;
-			res.modules.push_back(m);
-            std::cout << "Could not load DLL " << pszModName << " with error "<< GetLastError() << ", please check your paths" << std::endl;
-			continue;
-		}
-		m.handle = hImportDLL;
-		m.f = IATRESULTS::FAILUREREASON::SUCCESS;
+        if (!hImportDLL)
+        {
+            m.f = IATRESULTS::FAILUREREASON::NOTFOUND;
+            res.modules.push_back(m);
+            std::cout << "Could not load DLL " << pszModName << " with error " << GetLastError() << ", please check your paths" << std::endl;
+            continue;
+        }
+        m.handle = hImportDLL;
+        m.f = IATRESULTS::FAILUREREASON::SUCCESS;
 
-		// Get caller's import address table (IAT) for the callee's functions
-		PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)
-			((PBYTE)h + pImportDesc->FirstThunk);
+        // Get caller's import address table (IAT) for the callee's functions
+        PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)
+            ((PBYTE)h + pImportDesc->FirstThunk);
 
-		// Replace current function address with new function address
-		for (; pThunk->u1.Function; pThunk++)
-		{
-			IATRESULTS::FUNCTIONINFO fu;
+        // Replace current function address with new function address
+        for (; pThunk->u1.Function; pThunk++)
+        {
+            IATRESULTS::FUNCTIONINFO fu;
 
-			FARPROC pfnNew = 0;
-			size_t rva = 0;
+            FARPROC pfnNew = 0;
+            size_t rva = 0;
 #ifdef _WIN64
-			if (pThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG64)
+            if (pThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG64)
 #else
-			if (pThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG32)
+            if (pThunk->u1.Ordinal & IMAGE_ORDINAL_FLAG32)
 #endif
-			{
-				// Ordinal
+            {
+                // Ordinal
 #ifdef _WIN64
-				size_t ord = IMAGE_ORDINAL64(pThunk->u1.Ordinal);
+                size_t ord = IMAGE_ORDINAL64(pThunk->u1.Ordinal);
 #else
-				size_t ord = IMAGE_ORDINAL32(pThunk->u1.Ordinal);
+                size_t ord = IMAGE_ORDINAL32(pThunk->u1.Ordinal);
 #endif
 
-				fu.ord = ord;
-				m.functions.push_back(fu);
-				PROC* ppfn = (PROC*)&pThunk->u1.Function;
-				if (!ppfn)
-				{
-					fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
-					m.functions.push_back(fu);
-					continue;
-				}
-				rva = (size_t)pThunk;
+                fu.ord = ord;
+                m.functions.push_back(fu);
+                PROC* ppfn = (PROC*)&pThunk->u1.Function;
+                if (!ppfn)
+                {
+                    fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
+                    m.functions.push_back(fu);
+                    continue;
+                }
+                rva = (size_t)pThunk;
 
-				char fe[100] = { 0 };
-				sprintf_s(fe, 100, "#%u", ord);
-				pfnNew = GetProcAddress(hImportDLL, (LPCSTR)ord);
-				if (!pfnNew)
-				{
-					fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
-					m.functions.push_back(fu);
-					continue;
-				}
-			}
-			else
-			{
-				// Get the address of the function address
-				PROC* ppfn = (PROC*)&pThunk->u1.Function;
-				if (!ppfn)
-				{
-					fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
-					m.functions.push_back(fu);
-					continue;
-				}
-				rva = (size_t)pThunk;
-				PSTR fName = (PSTR)h;
-				fName += pThunk->u1.Function;
-				fName += 2;
-				if (!fName)
-					break;
-				fu.name = fName;
-                
+                char fe[100] = { 0 };
+                sprintf_s(fe, 100, "#%u", ord);
+                pfnNew = GetProcAddress(hImportDLL, (LPCSTR)ord);
+                if (!pfnNew)
+                {
+                    fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
+                    m.functions.push_back(fu);
+                    continue;
+                }
+            }
+            else
+            {
+                // Get the address of the function address
+                PROC* ppfn = (PROC*)&pThunk->u1.Function;
+                if (!ppfn)
+                {
+                    fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
+                    m.functions.push_back(fu);
+                    continue;
+                }
+                rva = (size_t)pThunk;
+                PSTR fName = (PSTR)h;
+                fName += pThunk->u1.Function;
+                fName += 2;
+                if (!fName)
+                    break;
+                fu.name = fName;
 
-				pfnNew = GetProcAddress(hImportDLL, fName);
-               // std::cout << "Func " << fName << "  " << pfnNew <<std::endl;
-				if (!pfnNew)
-				{
-					fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
-					m.functions.push_back(fu);
-					continue;
-				}
+
+                pfnNew = GetProcAddress(hImportDLL, fName);
+                // std::cout << "Func " << fName << "  " << pfnNew <<std::endl;
+                if (!pfnNew)
+                {
+                    fu.f = IATRESULTS::FAILUREREASON::NOTFOUND;
+                    m.functions.push_back(fu);
+                    continue;
+                }
                 auto fs = seekName.find(std::string(fName));
                 if (fs != seekName.end())
                 {
@@ -1284,62 +1379,62 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
                     pfnNew = fs->second;
                     printf("Found sought after function by name \n");
                 }
-			}
+            }
 
-			// Patch it now...
-			auto hp = GetCurrentProcess();
-			auto it = seek.find(pfnNew);
-			if (it != seek.end())
-			{
-				pfnNew = it->second;
-				printf("Found sought after function\n");
-			}
-			if (!WriteProcessMemory(hp, (LPVOID*)rva, &pfnNew, sizeof(pfnNew), NULL) && (ERROR_NOACCESS == GetLastError()))
-			{
-				DWORD dwOldProtect;
-				if (VirtualProtect((LPVOID)rva, sizeof(pfnNew), PAGE_WRITECOPY, &dwOldProtect))
-				{
-					if (!WriteProcessMemory(GetCurrentProcess(), (LPVOID*)rva, &pfnNew,
-						sizeof(pfnNew), NULL))
-					{
-						fu.f = IATRESULTS::FAILUREREASON::CANNOTPATCH;
-						continue;
-					}
-					if (!VirtualProtect((LPVOID)rva, sizeof(pfnNew), dwOldProtect,
-						&dwOldProtect))
-					{
-						fu.f = IATRESULTS::FAILUREREASON::CANNOTPATCH;
-						continue;
-					}
-				}
-			}
-			m.functions.push_back(fu);
-		}
-		res.modules.push_back(m);
-	}
+            // Patch it now...
+            auto hp = GetCurrentProcess();
+            auto it = seek.find(pfnNew);
+            if (it != seek.end())
+            {
+                pfnNew = it->second;
+                printf("Found sought after function\n");
+            }
+            if (!WriteProcessMemory(hp, (LPVOID*)rva, &pfnNew, sizeof(pfnNew), NULL) && (ERROR_NOACCESS == GetLastError()))
+            {
+                DWORD dwOldProtect;
+                if (VirtualProtect((LPVOID)rva, sizeof(pfnNew), PAGE_WRITECOPY, &dwOldProtect))
+                {
+                    if (!WriteProcessMemory(GetCurrentProcess(), (LPVOID*)rva, &pfnNew,
+                        sizeof(pfnNew), NULL))
+                    {
+                        fu.f = IATRESULTS::FAILUREREASON::CANNOTPATCH;
+                        continue;
+                    }
+                    if (!VirtualProtect((LPVOID)rva, sizeof(pfnNew), dwOldProtect,
+                        &dwOldProtect))
+                    {
+                        fu.f = IATRESULTS::FAILUREREASON::CANNOTPATCH;
+                        continue;
+                    }
+                }
+            }
+            m.functions.push_back(fu);
+        }
+        res.modules.push_back(m);
+    }
 }
 std::string GetLastErrorAsString()
 {
-	//Get the error message ID, if any.
-	DWORD errorMessageID = ::GetLastError();
-	if (errorMessageID == 0) {
-		return std::string(); //No error message has been recorded
-	}
+    //Get the error message ID, if any.
+    DWORD errorMessageID = ::GetLastError();
+    if (errorMessageID == 0) {
+        return std::string(); //No error message has been recorded
+    }
 
-	LPSTR messageBuffer = nullptr;
+    LPSTR messageBuffer = nullptr;
 
-	//Ask Win32 to give us the string version of that message ID.
-	//The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
-	size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-		NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
+    //Ask Win32 to give us the string version of that message ID.
+    //The parameters we pass in, tell Win32 to create the buffer that holds the message for us (because we don't yet know how long the message string will be).
+    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
 
-	//Copy the error message into a std::string.
-	std::string message(messageBuffer, size);
+    //Copy the error message into a std::string.
+    std::string message(messageBuffer, size);
 
-	//Free the Win32's string's buffer.
-	LocalFree(messageBuffer);
+    //Free the Win32's string's buffer.
+    LocalFree(messageBuffer);
 
-	return message;
+    return message;
 }
 
 std::vector<std::string> sn;
@@ -1362,9 +1457,9 @@ typedef void(__thiscall* openBook)(void* factory, void* bk, const std::string& n
 typedef void* (__thiscall* drmDataProv)(void*, const std::string& book, const std::list<std::string>& resources, const std::list<std::string>& vouchers);
 struct krfErr
 {
-	int code = -1;
-	std::string msg;
-	char padding[28] = { 0 };
+    int code = -1;
+    std::string msg;
+    char padding[28] = { 0 };
 };
 typedef void* (__cdecl* toQString)(void* qstring, const std::string& input);
 typedef void* (__thiscall* fromQString)(void* qstring, std::string& output);
@@ -1425,13 +1520,13 @@ struct KeyData
 
 
 
-void initKrfFunctions( KrfAccessFunctions* out)
+void initKrfFunctions(KrfAccessFunctions* out)
 {
-    out->GetPluginManager = (getPluginManager)(stoffset+ get_plugin_man);
-    out->LoadAllStaticModules = (loadAllStaticModules)(stoffset + load_all);
-    out->DrmDataProvider = (drmDataProv)(stoffset + drm_provider);
-    out->GetBookFactory = (getBookFactory)(stoffset + get_factory);
-    out->OpenBook = (openBook)(stoffset + open_book);
+    out->GetPluginManager = (getPluginManager)(stoffset + curOffs.get_plugin_man);
+    out->LoadAllStaticModules = (loadAllStaticModules)(stoffset + curOffs.load_all);
+    out->DrmDataProvider = (drmDataProv)(stoffset + curOffs.drm_provider);
+    out->GetBookFactory = (getBookFactory)(stoffset + curOffs.get_factory);
+    out->OpenBook = (openBook)(stoffset + curOffs.open_book);
 
 }
 
@@ -1481,7 +1576,7 @@ bool enumerateKindleFolder(TCHAR* path, DrmParameters* out)
     WIN32_FIND_DATA ffd;
     //LARGE_INTEGER filesize;
     TCHAR szDir[MAX_PATH];
-    size_t length_of_arg=0;
+    size_t length_of_arg = 0;
     HANDLE hFind = INVALID_HANDLE_VALUE;
     DWORD dwError = 0;
     std::basic_string<TCHAR> conv = path;// std::basic_string<TCHAR>(path.begin(), path.end());
@@ -1550,13 +1645,18 @@ int  tryOpeningBook(KrfAccessFunctions* ctx, const std::string& serial, const st
     else
     {
         std::cout << "Succesfully opened book " << params->bookFile << std::endl;
-     //   while (true) {};
+        //   while (true) {};
     }
-    
+
     if (err.code == 0)
     {
         out->aggregate(&keydataAccumulator);
         //return true;
+    }
+    else
+    { //even failed book sometimes generates secrets.
+
+        out->old_secrets.insert(keydataAccumulator.old_secrets.begin(), keydataAccumulator.old_secrets.end());
     }
     if (rebook != nullptr)
     {
@@ -1597,7 +1697,7 @@ void accumulateOldSecrets(KrfAccessFunctions* ctx, const std::string& serial, st
 {
     if (oldSecretsAccumulated) return;
     std::cout << "Found KFX book that uses secrets, trying to accumulate older secrets" << std::endl;
-    for (auto secret :*secret_candidates)
+    for (auto secret : *secret_candidates)
     {
         keydataAccumulator.reset();
         unsigned int sub[3000];
@@ -1612,7 +1712,7 @@ void accumulateOldSecrets(KrfAccessFunctions* ctx, const std::string& serial, st
         armed = true;
         ctx->OpenBook(bookFactory, &rebook, params->bookFile, sub, &err, params->resources);
         armed = false;
-       
+
         if (keydataAccumulator.old_secrets.size() > 0)
         {
             out->aggregate(&keydataAccumulator);
@@ -1650,6 +1750,13 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outfile, std::set<
     std::set<std::string> working_serials;
     std::set<std::string> working_secrets;
     std::set<std::string> old_secrets;
+    for (auto secr : *secret_candidates)
+    {
+        if (secr.size() == 40)
+        { //add already decrypted secrets just in case
+            old_secrets.insert(secr);
+        }
+    }
     do
     {
 
@@ -1688,10 +1795,10 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outfile, std::set<
                             {
                                 std::cout << "Opened book with reused secret: " << secret << std::endl;
                             }
-                        else
-                        {
-                            std::cout << "This book does not seem to use account secrets" << std::endl;
-                        }
+                            else
+                            {
+                                std::cout << "This book does not seem to use account secrets" << std::endl;
+                            }
                             break;
                         }
                         if (code == 14)
@@ -1775,7 +1882,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outfile, std::set<
                         }
                     }
                 }
-                
+
             }
 
         }
@@ -1799,7 +1906,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outfile, std::set<
         if (k4i)
         {
             std::cout << "Writing DSN and secrets into " << *k4ifile << std::endl;
-            nlohmann::json jsn= nlohmann::json();
+            nlohmann::json jsn = nlohmann::json();
             int cnt = 0;
 
             for (auto& serial : working_serials)
@@ -1924,23 +2031,22 @@ void tryAssignKey(BinaryIonParser* drmkey)
 }
 
 
-void pmemset(void* p,int v, size_t s)
-{
-    if(armed&&s>0)
-    {
-      armed = false;
-      std::cout<<"Memset of "<<s<<" :  "  << hexStr((uint8_t*)p, s) << std::endl;
-      armed = true;
-    }
-    memset(p, v, s);
-}
-void pmemcpy(void* p, const void * d, size_t s)
+void pmemset(void* p, int v, size_t s)
 {
     if (armed && s > 0)
     {
         armed = false;
-
-      //  std::cout << "Memcpy of " << s << " :  " << hexStr((uint8_t*)p, s) << std::endl;
+        std::cout << "Memset of " << s << " :  " << hexStr((uint8_t*)p, s) << std::endl;
+        armed = true;
+    }
+    memset(p, v, s);
+}
+void pmemcpy(void* p, const void* d, size_t s)
+{
+    if (armed && s > 0)
+    {
+        armed = false;
+        //  std::cout << "Memcpy of " << s << " :  " << hexStr((uint8_t*)p, s) << std::endl;
         armed = true;
     }
     memcpy(p, d, s);
@@ -1951,8 +2057,8 @@ void* pmalloc(size_t sz)
     void* dat = malloc(sz);
     if (armed)
     {
-       // printf("Allocating %p %lu\n", dat, sz);
-        
+        // printf("Allocating %p %lu\n", dat, sz);
+
         sizes[dat] = sz;
     }
     return dat;
@@ -1963,24 +2069,24 @@ void pfree(void* p)
     {
        printf("Freeing %p %lu\n",p,sizes[p]);
     }*/
-  
-    if (armed&&p!=nullptr&&sizes[p]>1000)
+
+    if (armed && p != nullptr && sizes[p] > 39)
     {
-        uint8_t* pp=(uint8_t*)p;
+        uint8_t* pp = (uint8_t*)p;
         char* pc = (char*)p;
-        BinaryIonParser bp(&pp[16], sizes[p]-16, TID_TYPEDECL);
-        //std::cout << hexStr((uint8_t*)&pp[16], sizes[p]-16) << std::endl;
+        BinaryIonParser bp(&pp[curOffs.mem_offset], sizes[p] - curOffs.mem_offset, TID_TYPEDECL);
+        //std::cout << hexStr((uint8_t*)&pp[0], sizes[p]) << std::endl;
         if (bp.hasnext())
         {
             int nxt = bp.next();
             if (nxt == TID_LIST)
             {
-                if (bp.annotations.size()>0&& bp.annotations[0] == keysetIndex)
+                if (bp.annotations.size() > 0 && bp.annotations[0] == keysetIndex)
                 {
                     //valuefieldid
                     //std::cout << "Correct: " << hexStr((uint8_t*)&pp[16], 16) << std::endl;
                     tryAssignKey(&bp);
-                   // while (true) {}
+                    // while (true) {}
                 }
 
             }
@@ -1991,16 +2097,17 @@ void pfree(void* p)
             bool brk = false;
             for (int i = 0; i < 40; i++)
             {
-                if (!isxdigit(pc[i])|| pc[i]==0)
+                if (!isxdigit(pc[i]) || pc[i] == 0)
                 {
                     brk = true;
                     break;
                 }
             }
+            // std::cout << hexStr((uint8_t*)&pp[0], sizes[p]>32 ? 32 : sizes[p]) << std::endl;
             if (!brk && pc[41] == 0)
             {
                 std::cout << "secrets " << std::string(pc) << std::endl;
-                
+
                 keydataAccumulator.old_secrets.insert(std::string(pc));
             }
         }
@@ -2012,37 +2119,50 @@ void pfree(void* p)
 
 std::list<std::string> splitStringBySubstring(const std::string& str, const std::string& delimiter)
 {
-	std::list<std::string> result;
-	size_t start = 0;
-	size_t end = str.find(delimiter);
+    std::list<std::string> result;
+    size_t start = 0;
+    size_t end = str.find(delimiter);
 
-	while (end != std::string::npos) {
-		result.push_back(str.substr(start, end - start));
-		start = end + delimiter.length();
-		end = str.find(delimiter, start);
-	}
-	result.push_back(str.substr(start)); // Add the last part
+    while (end != std::string::npos) {
+        result.push_back(str.substr(start, end - start));
+        start = end + delimiter.length();
+        end = str.find(delimiter, start);
+    }
+    result.push_back(str.substr(start)); // Add the last part
 
-	return result;
+    return result;
 }
 
 
-
+bool findExec(int lucene)
+{
+    for (int i = 0; i < knum; i++)
+    {
+        if (checkExecs(lucene, kindles[i]))
+        {
+            curOffs = kindles[i];
+            return true;
+        }
+    }
+  
+   
+    return false;
+}
 
 int main(int argc, char* argv[])
 {
-	PWSTR localcappdata = NULL;
-	PWSTR programfiles = NULL;
-	const wchar_t * amazon_storage = L"Amazon\\Kindle\\storage\\.kinf2024";
-	const wchar_t* amazon_app = L"Amazon\\Kindle\\application";
-	const wchar_t* storage_fl = L"storage\\.kinf2024";
+    PWSTR localcappdata = NULL;
+    PWSTR programfiles = NULL;
+    const wchar_t* amazon_storage = L"Amazon\\Kindle\\storage\\.kinf2024";
+    const wchar_t* amazon_app = L"Amazon\\Kindle\\application";
+    const wchar_t* storage_fl = L"storage\\.kinf2024";
 
 
     if (argc < 4)
     {
         std::cout << "Usage: executable <kindle documents path (with _EBOK folders)> <output file> <output k4i file>" << std::endl;
         std::cout << "This program searches for Kindle executable in standard locations, run it from wherever, but it prefers Kindle installations in local folder (%APPDATA%/Local/Amazon/Kindle)" << std::endl;
-        std::cout << "Please ensure that Kindle.exe is of the appropriate version (currently md5 93fce0fedb6cd17514f9a72f963dbdba, kindle 2.8.0(70980))" << std::endl;
+        std::cout << "Please ensure that Kindle.exe is of the appropriate version (currently  Kindle 2.8.0(70980), Kindle 2.8.1(70985), Kindle 2.8.2(70987))" << std::endl;
         std::cout << "In case Kindle version does not match, it would crash" << std::endl;
         std::cout << "Note: to get proper values into k4i file, at least one KFX book that uses account secrets should be downloaded. If resulting k4i has no tokens set, try downloading some free books." << std::endl;
         std::cout << "Note 2: this utility creates a temporary /storage folder in %APPDATA%/Local. It can be deleted after use. " << std::endl;
@@ -2050,49 +2170,51 @@ int main(int argc, char* argv[])
     }
     std::string folder_path = argv[1];
     std::string out_path = argv[2];
-    std::cout << "Scanning " << folder_path << " for book folders"<<std::endl;
+    std::cout << "Scanning " << folder_path << " for book folders" << std::endl;
     std::string k4;
     std::string* k4file = nullptr;
     k4 = argv[3];
     k4file = &k4;
 
 
-	HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localcappdata);
-	
-	// Check if the function call was successful.
-	if (!SUCCEEDED(hr))
-	{
-		std::cerr << "Failed to get the LocalAppData folder path. HRESULT: " << hr << std::endl;
-		return 1;
-	}
+    HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localcappdata);
+
+    // Check if the function call was successful.
+    if (!SUCCEEDED(hr))
+    {
+        std::cerr << "Failed to get the LocalAppData folder path. HRESULT: " << hr << std::endl;
+        return 1;
+    }
     hr = SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, 0, NULL, &programfiles);
-	if (!SUCCEEDED(hr))
-	{
-		std::cerr << "Failed to get the Programfiles folder path. HRESULT: " << hr << std::endl;
-		return 1;
-	}
-	
-	wchar_t kindle_local_path[MAX_PATH];
+    if (!SUCCEEDED(hr))
+    {
+        std::cerr << "Failed to get the Programfiles folder path. HRESULT: " << hr << std::endl;
+        return 1;
+    }
+
+    wchar_t kindle_local_path[MAX_PATH];
     wchar_t kindle_global_path[MAX_PATH];
-	PathCombineW(kindle_local_path, localcappdata, amazon_app);
+    PathCombineW(kindle_local_path, localcappdata, amazon_app);
     PathCombineW(kindle_global_path, programfiles, L"Amazon\\Kindle\\");
-    wchar_t exe_local [MAX_PATH] ;
+    wchar_t exe_local[MAX_PATH];
     wchar_t exe_global[MAX_PATH];
+
+    
     PathCombineW(exe_local, kindle_local_path, L"Kindle.exe");
     PathCombineW(exe_global, kindle_global_path, L"Kindle.exe");
 
-	wchar_t kindle_path[MAX_PATH];
-	wchar_t qt_path[MAX_PATH];
-	wchar_t kindle_storage[MAX_PATH];
+    wchar_t kindle_path[MAX_PATH];
+    wchar_t qt_path[MAX_PATH];
+    wchar_t kindle_storage[MAX_PATH];
     main_path = kindle_local_path;
-	if (PathFileExists(exe_local))
-	{
-		PathCombineW(kindle_path, kindle_local_path, L"Kindle.exe");
-		PathCombineW(qt_path, kindle_local_path, L"Qt5Core.dll");
+    if (PathFileExists(exe_local))
+    {
+        PathCombineW(kindle_path, kindle_local_path, L"Kindle.exe");
+        PathCombineW(qt_path, kindle_local_path, L"Qt5Core.dll");
         main_path = kindle_local_path;
-	}
-	else
-	{
+    }
+    else
+    {
         if (PathFileExists(exe_global))
         {
             PathCombineW(kindle_path, kindle_global_path, L"Kindle.exe");
@@ -2113,130 +2235,150 @@ int main(int argc, char* argv[])
             std::wcout << L"Kindle.exe not found in " << exe_local << L" or " << exe_global << std::endl;
             return 1;
         }
-	
-	}
+
+    }
     std::wcout << "adding search dir " << main_path << std::endl;
     SetDllDirectory(main_path);
-	PathCombineW(kindle_storage, localcappdata, amazon_storage);
-	if (!PathFileExists(kindle_storage))
-	{
-		std::wcout << "Kindle4PC kinf file not found at " << kindle_storage << " , Please log in to kindle4pc or copy that file if it is placed somewhere else" << std::endl;
-		return 1;
-	}
-	std::wcout << L"Kindle Directory: " << kindle_path << std::endl;
-	HINSTANCE kindle = LoadLibrary(kindle_path);
-	if (kindle == nullptr)
-	{
-		std::cerr << "Error loading kindle " << GetLastErrorAsString() << std::endl;
-		return 2;
-	}
-	wchar_t empty_storage_folder[MAX_PATH];
-	PathCombineW(empty_storage_folder, localcappdata, L"storage");
-	if (!PathFileExists(empty_storage_folder))
-	{
-		std::wcout << "Creating storage folder for temp storage file: " << empty_storage_folder << std::endl;
-		if (!CreateDirectory(empty_storage_folder, NULL))
-		{
-			std::cout << "Could not create directory " << GetLastErrorAsString()<<std::endl;
-			return 2;
-		}
-	}
-	wchar_t temp_storage_file[MAX_PATH];
-	PathCombineW(temp_storage_file, localcappdata, storage_fl);
-	if (!CopyFile(kindle_storage, temp_storage_file,false))
-	{
-		std::cout << "Could not copy storage file to temp location" << GetLastErrorAsString() << std::endl;
-		return 2;
-	}
-	IATRESULTS res;
-	std::map<FARPROC, FARPROC> repls;
-	repls[(FARPROC)&free] = (FARPROC)&pfree;
+    wchar_t old_cwd[MAX_PATH];
+    GetCurrentDirectoryW(MAX_PATH, old_cwd);
+    
+    PathCombineW(kindle_storage, localcappdata, amazon_storage);
+    if (!PathFileExists(kindle_storage))
+    {
+        std::wcout << "Kindle4PC kinf file not found at " << kindle_storage << " , Please log in to kindle4pc or copy that file if it is placed somewhere else" << std::endl;
+        return 1;
+    }
+    std::wcout << L"Kindle Directory: " << kindle_path << std::endl;
+    SetCurrentDirectoryW(main_path);
+    HINSTANCE kindle = LoadLibrary(L"./Kindle.exe");//load kindle.exe 
+    IATRESULTS res;
+    std::map<FARPROC, FARPROC> repls;
+    repls[(FARPROC)&free] = (FARPROC)&pfree;
     repls[(FARPROC)&malloc] = (FARPROC)&pmalloc;
-    std::cout << "Memset " << &memset << std::endl;
     //repls[(FARPROC)&memset] = (FARPROC)&pmemset;
     std::map<std::string, FARPROC> replsName;
     //replsName["memset"]= (FARPROC)&pmemset;
-	ParseIAT(kindle, res, repls, replsName);
-	
-	if (qtlib == nullptr)
-	{
-		std::cerr << "Error loading qt " << GetLastErrorAsString() << std::endl;
-		return 2;
-	}
-	toQString toQ = (toQString)GetProcAddress(qtlib, "?fromStdString@QString@@SA?AV1@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
-	fromQString fromQ = (fromQString)GetProcAddress(qtlib, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
-	int cc = (int)GetProcAddress(kindle, ("??0Analyzer@Lucene@@QAE@ABV01@@Z"));
-	stoffset = cc - luceneaddr;
-    printf("Got offset: %x\n",stoffset);
-	_initterm_e((_PIFV*)(stoffset + initterm_e_start), (_PIFV*)(stoffset + initterm_e_end));
+    ParseIAT(kindle, res, repls, replsName); //patch and replace symbols
+    SetCurrentDirectoryW(old_cwd); //return back to original dir
+    if (kindle == nullptr)
+    {
+        std::cerr << "Error loading kindle " << GetLastErrorAsString() << std::endl;
+        return 2;
+    }
+    wchar_t empty_storage_folder[MAX_PATH];
+    PathCombineW(empty_storage_folder, localcappdata, L"storage");
+    if (!PathFileExists(empty_storage_folder))
+    {
+        std::wcout << "Creating storage folder for temp storage file: " << empty_storage_folder << std::endl;
+        if (!CreateDirectory(empty_storage_folder, NULL))
+        {
+            std::cout << "Could not create directory " << GetLastErrorAsString() << std::endl;
+            return 2;
+        }
+    }
+    wchar_t temp_storage_file[MAX_PATH];
+    PathCombineW(temp_storage_file, localcappdata, storage_fl);
+    if (!CopyFile(kindle_storage, temp_storage_file, false))
+    {
+        std::cout << "Could not copy storage file to temp location" << GetLastErrorAsString() << std::endl;
+        return 2;
+    }
+
+
+    if (qtlib == nullptr)
+    {
+        std::cerr << "Error loading qt " << GetLastErrorAsString() << std::endl;
+        SetCurrentDirectoryW(old_cwd);
+        return 2;
+    }
+    toQString toQ = (toQString)GetProcAddress(qtlib, "?fromStdString@QString@@SA?AV1@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+    fromQString fromQ = (fromQString)GetProcAddress(qtlib, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+    int cc = (int)GetProcAddress(kindle, ("??0Analyzer@Lucene@@QAE@ABV01@@Z"));
+    if (!findExec(cc))
+    {
+        std::cout << "Could not find supported kindle version, aborting"  << std::endl;
+        return 4;
+    }
+    else
+    {
+        std::cout << "Found Kindle executable of version " << curOffs.version << std::endl;
+    }
+    stoffset = cc - curOffs.luceneaddr;
+    printf("Got offset: %x\n", stoffset);
+    _initterm_e((_PIFV*)(stoffset + curOffs.initterm_e_start), (_PIFV*)(stoffset + curOffs.initterm_e_end));
     //printf("Initialized exceptions \n");
 
     //flip tlls initialized flag
-	ipcall tlsset = (ipcall)(stoffset + tls_reset);
-	int rt = 1;
-	//need to reset tls flag so that static vars would initialize, i think
-	tlsset(&rt);
+    ipcall tlsset = (ipcall)(stoffset + curOffs.tls_reset);
+    int rt = 1;
+    //need to reset tls flag so that static vars would initialize, i think
+    tlsset(&rt);
     //printf("Flipped tls \n");
 
-	//init global/static vars
-    _PVFV* ppfn = (_PVFV*)(stoffset + initterm_start);
-    _PVFV* ppend = (_PVFV*)(stoffset + initterm_end);
+    //init global/static vars
+    _PVFV* ppfn = (_PVFV*)(stoffset + curOffs.initterm_start);
+    _PVFV* ppend = (_PVFV*)(stoffset + curOffs.initterm_end);
     do {
         if (_PVFV pfn = *++ppfn) {
             //printf("Running initializer %x\n",(int)pfn-stoffset);
             pfn();
         }
     } while (ppfn < ppend);
-	//_initterm((_PVFV*)(stoffset + initterm_start), (_PVFV*)(stoffset + initterm_end));
+    //_initterm((_PVFV*)(stoffset + initterm_start), (_PVFV*)(stoffset + initterm_end));
     //printf("Initialized globals \n");
-	std::string tokens = std::string("kindle.account.tokens");
-	std::string dsn = std::string("DSN");
-	vpcall MakeKindleInfoStorage = (vpcall)(stoffset + make_storage);
-	void* kinfo = MakeKindleInfoStorage();
+    std::string tokens = std::string("kindle.account.tokens");
+    std::string dsn = std::string("DSN");
+    vpcall MakeKindleInfoStorage = (vpcall)(stoffset + curOffs.make_storage);
+    void* kinfo = MakeKindleInfoStorage();
     //printf("Opened storage %p\n", kinfo);
-	//note: QStrings are not destroyed, so there is some leak, but we don't care
-	getme getVal = (getme)(stoffset + get_storage_value);
-	char qtokens[256];
-	void* tknz = toQ(qtokens, tokens); //std::string("kindle.account.tokens"));
-	char qdsn[256];
-	void* dsnz = toQ(qdsn, dsn); //std::string("kindle.account.tokens"));
-	char qstbufout[256];
-	void* nretout = toQ(qstbufout, std::string(""));
-	//getVal(kinfo, nretout, tknz);
-   std::string out_tokens = "fdf";
-	std::string out_dsn = "sds";
-	getVal(kinfo, nretout, tknz);
-	fromQ(nretout, out_tokens);
+    //note: QStrings are not destroyed, so there is some leak, but we don't care
+    getme getVal = (getme)(stoffset + curOffs.get_storage_value);
+    char qtokens[256];
+    void* tknz = toQ(qtokens, tokens); //std::string("kindle.account.tokens"));
+    char qdsn[256];
+    void* dsnz = toQ(qdsn, dsn); //std::string("kindle.account.tokens"));
+    char qstbufout[256];
+    void* nretout = toQ(qstbufout, std::string(""));
+    //getVal(kinfo, nretout, tknz);
+    std::string out_tokens = "fdf";
+    std::string out_dsn = "sds";
+    getVal(kinfo, nretout, tknz);
+    fromQ(nretout, out_tokens);
     //printf("Got tokens\n");
-	getVal(kinfo, nretout, dsnz);
-	fromQ(nretout, out_dsn);
+    getVal(kinfo, nretout, dsnz);
+    fromQ(nretout, out_dsn);
     //printf("Got dsn\n");
-	std::cout << "DSN " << out_dsn << std::endl;
-	std::cout << "Tokens " << out_tokens << std::endl;
-	if (out_dsn.empty())
-	{
-		std::cout << "Could not get DSN from storage, aborting" << std::endl;
-		return 3;
-	}
-	if (out_tokens.empty())
-	{
-		std::cout << "Could not get account tokens from storage, aborting" << std::endl;
-		return 3;
-	}
+    std::cout << "DSN " << out_dsn << std::endl;
+    std::cout << "Tokens " << out_tokens << std::endl;
+
+    if (out_dsn.empty())
+    {
+        std::cout << "Could not get DSN from storage, aborting" << std::endl;
+        SetCurrentDirectoryW(old_cwd);
+        return 3;
+    }
+
+    if (out_tokens.empty())
+    {
+        std::cout << "Could not get account tokens from storage, aborting" << std::endl;
+        SetCurrentDirectoryW(old_cwd);
+        return 3;
+    }
     std::list<std::string> secrets = splitStringBySubstring(out_tokens, ",");
-    initKrfFunctions( &globalKRFContext);
+    initKrfFunctions(&globalKRFContext);
     initKRFContext(&globalKRFContext);
     std::set<std::string> serial_candidates;
     std::set<std::string> secret_candidates;
     serial_candidates.insert(out_dsn);
     for (auto val : secrets)
     {
-       secret_candidates.insert(val);
+        secret_candidates.insert(val);
     }
-   // 
-    
+    // 
+
 
     std::basic_string<TCHAR> wfolder_path = std::basic_string<wchar_t>(folder_path.begin(), folder_path.end());// L".\\";
+    SetCurrentDirectoryW(old_cwd);
+    enumerateKindleDir(wfolder_path.data(), out_path, &serial_candidates, &secret_candidates, k4file);
    
-    enumerateKindleDir(wfolder_path.data(), out_path, &serial_candidates, &secret_candidates,k4file);
 }

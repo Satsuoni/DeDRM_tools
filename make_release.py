@@ -20,6 +20,7 @@ OBOK_SRC_DIR = 'Obok_plugin'
 OBOK_README = 'obok_plugin_ReadMe.txt'
 KRFTool="Other_Tools/KRFKeyExtractor/KRFKeyExtractor.exe"
 KRFTool28="Other_Tools/KRFKeyExtractor/KFXKeyExtractor28.exe"
+KRFTool282="Other_Tools/KRFKeyExtractor/KFXKeyExtractor282.exe"
 
 KRFFrida="Other_Tools/KRFKeyExtractor/kindleFridaInstr.py"
 RELEASE_DIR = 'release'
@@ -88,6 +89,10 @@ def make_release(version):
         pass
     try:
         shutil.copy(KRFTool28, RELEASE_DIR)
+    except:
+        pass    
+    try:
+        shutil.copy(KRFTool282, RELEASE_DIR)
     except:
         pass    
     try:

@@ -158,7 +158,7 @@ class ConfigWidget(QWidget):
         button_layout.addWidget(self.kindle_android_button)
         button_layout.addWidget(self.kindle_key_button)
         ## mine 
-        self._hbox = QGroupBox(_(''), self)
+        self._hbox = QGroupBox('', self)
         button_layout.addWidget(self._hbox)
         hlayout = QVBoxLayout()
         hlayout.setContentsMargins(0,0,0,0)
@@ -180,7 +180,11 @@ class ConfigWidget(QWidget):
         self._clear_extrakeyfile_button.clicked.connect(self.clear_kindleextrakeyfile)
         dbut_layout.addWidget(self._select_extrakeyfile_button)
         dbut_layout.addWidget(self._clear_extrakeyfile_button)
-        hlayout.addLayout(dbut_layout)
+        self._sbox=QWidget()
+        self._sbox.setContentsMargins(0,0,0,0)
+        dbut_layout.setContentsMargins(0,0,0,0)
+        self._sbox.setLayout(dbut_layout)
+        hlayout.addWidget(self._sbox)
 
         """
         self._hbox = QGroupBox(_('Configuration:'), self)#QWidget ()
