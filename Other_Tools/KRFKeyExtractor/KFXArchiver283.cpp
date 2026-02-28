@@ -64,6 +64,30 @@ struct ExecOffsets
 };
 
 ExecOffsets curOffs;
+ExecOffsets Kindle283()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x0016cdc20;
+    ret.initterm_e_start = 0x002ad66f8;
+    ret.initterm_e_end = 0x002ad6710;
+    ret.tls_reset = 0x00252be0f;
+    ret.initterm_start = 0x2a93158;
+    ret.initterm_end = 0x02ad66f4;
+    ret.make_storage = 0x137de20;
+    ret.get_storage_value = 0x004b8c80;
+    ret.get_plugin_man = 0x017baf60;
+    ret.load_all = 0x0017bb060;
+    ret.get_factory = 0x17ba4e0;
+    ret.open_book = 0x17ba640;
+    ret.drm_provider = 0x017ba980;
+    ret.mem_offset = 20;
+
+    ret.decr_offset = 0x20f0180;
+    ret.mbox_capture = 0x20f0240;
+    ret.version = "Kindle 2.8.3(70995)";
+    return ret;
+}
+
 ExecOffsets Kindle282()
 {
     ExecOffsets ret;
@@ -81,7 +105,7 @@ ExecOffsets Kindle282()
     ret.open_book = 0x17ba640;
     ret.drm_provider = 0x017ba980;
     ret.mem_offset = 20;
-    ret.decr_offset =  0x20f0200;
+    ret.decr_offset =  0x20f0200; 
     ret.mbox_capture = 0x20f02c0;
     ret.version = "Kindle 2.8.2(70987)";
     return ret;
@@ -133,8 +157,8 @@ ExecOffsets Kindle280()
     ret.version = "Kindle 2.8.0(70980)";
     return ret;
 }
-const int knum = 3;
-ExecOffsets kindles[knum] = { Kindle280(),Kindle281(),Kindle282()};
+const int knum = 4;
+ExecOffsets kindles[knum] = { Kindle280(),Kindle281(),Kindle282(),Kindle283() };
 bool checkExecs(int luceneAddr, const ExecOffsets& offs)
 {
     int diff = luceneAddr - offs.luceneaddr;
