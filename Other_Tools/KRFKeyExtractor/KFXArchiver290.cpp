@@ -60,10 +60,43 @@ struct ExecOffsets
      int mem_offset = 0;
      int decr_offset = 0;
      int mbox_capture = 0;
+     int entry = 0;
+     int mbox_size = 0;
+     int mbox_iv_offset = 0;
      std::string version="";
 };
 
 ExecOffsets curOffs;
+ExecOffsets Kindle290()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0;
+    ret.entry = 0x000252ea5c;
+    ret.initterm_e_start = 0x0002ad96f8; 
+    ret.initterm_e_end = 0x0002ad9710;
+
+    ret.tls_reset = 0x252e0ef;
+    ret.initterm_start = 0x02a9615c; 
+    ret.initterm_end = 0x02ad96f4;
+    ret.make_storage = 0x01382a80;
+    ret.get_storage_value = 0x004b8c80;
+    ret.get_plugin_man = 0x017c00c0;
+    ret.load_all = 0x017c01c0;
+
+    ret.get_factory = 0x017bf640;
+    ret.open_book = 0x017bf7a0;
+    ret.drm_provider = 0x017bfae0;
+    ret.mem_offset = 20;
+
+    ret.decr_offset = 0x20f1310;
+    ret.mbox_capture = 0x20f13d0;
+    
+    ret.mbox_size = 119208;
+    ret.mbox_iv_offset = 0x1d180;
+    ret.version = "Kindle 2.9.0(71000)";
+    return ret;
+}
+
 ExecOffsets Kindle283()
 {
     ExecOffsets ret;
@@ -84,6 +117,8 @@ ExecOffsets Kindle283()
 
     ret.decr_offset = 0x20f0180;
     ret.mbox_capture = 0x20f0240;
+    ret.mbox_size = 119448;
+    ret.mbox_iv_offset =0x1d270;
     ret.version = "Kindle 2.8.3(70995)";
     return ret;
 }
@@ -107,6 +142,9 @@ ExecOffsets Kindle282()
     ret.mem_offset = 20;
     ret.decr_offset =  0x20f0200; 
     ret.mbox_capture = 0x20f02c0;
+    ret.mbox_size = 119448;
+    ret.mbox_iv_offset = 0x1d270;
+
     ret.version = "Kindle 2.8.2(70987)";
     return ret;
 }
@@ -131,6 +169,9 @@ ExecOffsets Kindle281()
     ret.mem_offset = 20;
     ret.decr_offset = 0x0211d580;
     ret.mbox_capture = 0x211d640; //check
+    ret.mbox_size = 119448;
+    ret.mbox_iv_offset = 0x1d270;
+
     ret.version = "Kindle 2.8.1(70985)";
     return ret;
 }
@@ -154,14 +195,25 @@ ExecOffsets Kindle280()
     ret.mem_offset = 16;
     ret.decr_offset = 0x022782d0;
     ret.mbox_capture = 0x2278390;
+    ret.mbox_size = 119448;
+    ret.mbox_iv_offset = 0x1d270;
     ret.version = "Kindle 2.8.0(70980)";
     return ret;
 }
-const int knum = 4;
-ExecOffsets kindles[knum] = { Kindle280(),Kindle281(),Kindle282(),Kindle283() };
-bool checkExecs(int luceneAddr, const ExecOffsets& offs)
+const int knum = 5;
+ExecOffsets kindles[knum] = { Kindle280(),Kindle281(),Kindle282(),Kindle283(),Kindle290()};
+bool checkExecs(int luceneAddr,int entry, const ExecOffsets& offs)
 {
-    int diff = luceneAddr - offs.luceneaddr;
+
+    int diff = 0;
+    if(luceneAddr!=0)
+    {
+    diff=luceneAddr - offs.luceneaddr;
+    }
+    else
+    {
+        diff = entry - offs.entry;
+    }
     /*printf("Lucene %02X\n", *(unsigned char*)(luceneAddr));
     printf("TLS Reset %02X\n", *(unsigned char*)(diff + offs.tls_reset));
 
@@ -1544,7 +1596,7 @@ char* read_file(const char* filename, size_t& size)
     return buffer; 
 }
 
-std::vector<char> mboxsave(119424);
+std::vector<char> mboxsave(150000);//119424
 bool mbox_saved = false;
 
 class BasicDecryptor
@@ -1565,7 +1617,9 @@ public:
         typedef void(__cdecl* aes_decrypt_call)(void* mbbox_1, unsigned char* input_ciphertext_2, unsigned int chunk_len_3, unsigned char* output_4, unsigned int* alllocated_len_ptr_5);
         aes_decrypt_call callme = (aes_decrypt_call)(stoffset + curOffs.decr_offset);
         //set iv
-        memcpy(mbox_address + 0x749c * 4, &iv[0], iv.size());
+       //memcpy(mbox_address + 0x749c * 4, &iv[0], iv.size());
+        memcpy(mbox_address + curOffs.mbox_iv_offset, &iv[0], iv.size());
+        
         out.resize(ciphertext.size());
         unsigned int sz = out.size();
         callme(mbox_address, &ciphertext[0], ciphertext.size(), &out[0], &sz);
@@ -1584,6 +1638,7 @@ public:
             return;
         }
         out.resize(sz- out[out.size() - 1]);
+        //while (1) {}
     }
 };
 class AesDecryptor : public BasicDecryptor
@@ -2085,7 +2140,8 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
     hFind = FindFirstFile(szDir, &ffd);
     if (hFind == INVALID_HANDLE_VALUE)
     {
-        std::cout << "Could not open directory" << std::endl;
+        DWORD err = GetLastError();
+        std::cout << "Could not open book directory : " << err<< std::endl;
         return;
     }
     std::set<std::string> working_serials;
@@ -2392,11 +2448,26 @@ void pmemset(void* p, int v, size_t s)
     if (armed && s > 0)
     {
         armed = false;
-       // std::cout << "Memset of " << s << " :  " << hexStr((uint8_t*)p, s) << "  to  "<<v<< std::endl;
-        //printf("At %p \n", p);
+        //std::cout << "Memset of " << s << " :  " << hexStr((uint8_t*)p, s) << "  to  "<<v<< std::endl;
+       // printf("At %p \n", p);
         armed = true;
     }
     memset(p, v, s);
+}
+uint8_t* scandidate = nullptr;
+int scancntr = 0;
+bool allhex(uint8_t* p, size_t ln)
+{
+    bool brk = false;
+    for (int i = 0; i < ln; i++)
+    {
+        if (!isxdigit(p[i]) || p[i] == 0)
+        {
+            brk = true;
+            break;
+        }
+    }
+    return !brk;
 }
 void pmemcpy(void* p, const void* src, size_t s)
 {
@@ -2404,8 +2475,8 @@ void pmemcpy(void* p, const void* src, size_t s)
     if (armed && s > 0)
     {
         armed = false;
-        //std::string hex = hexStr((uint8_t*)src, s);
-        //std::cout << "Memcpy of " << s << " :  " << hex << std::endl;
+        std::string hex = hexStr((uint8_t*)src, s);
+       // std::cout << "Memcpy of " << s << " :  " << hex << std::endl;
         if (s == 48)
         {
             const char* srcc = (const char*)src;
@@ -2418,15 +2489,24 @@ void pmemcpy(void* p, const void* src, size_t s)
                 keydataAccumulator.old_secrets.insert(psecret);
             }
         }
-        //printf("Atcpy %p  to %p caller %x \n", src,p, (int)_ReturnAddress()- stoffset);
+        if (s == 31 && sizes[p] >= 40&&allhex((uint8_t*)src,s))
+        {
+            scandidate = (uint8_t*)p;
+            std::cout << "Secrect candidate " << hex << std::endl;
+            scancntr = 0;
+        }
+       // printf("Atcpy %p  to %p caller %x \n", src,p, (int)_ReturnAddress()- stoffset);
+       
         int caller = (int)_ReturnAddress() - stoffset;
         if (caller == curOffs.mbox_capture)
         {
             char* mbox_addess =(char*)( (int)src - 0x749c * 4);
+            
             armed = false;
             if (!mbox_saved)
             {
-                memcpy(&mboxsave[0], mbox_addess, 119424 - 8);
+                printf("Mbox address %p \n", mbox_addess - 8);
+                memcpy(&mboxsave[0], mbox_addess, 119424 - 8);//119448
                 mbox_saved = true;
             }
             armed = true;
@@ -2499,7 +2579,34 @@ void pfree(void* p)
 {
     if (armed)
     {
-      // printf("Freeing %p %lu\n",p,sizes[p]);
+        if (scandidate != nullptr)
+        {
+            scancntr += 1;
+            if(scancntr==2)
+            {
+            std::cout << "Candidate: " << hexStr((uint8_t*)&scandidate[0],48) << std::endl;
+            if (allhex(scandidate, 40))
+            {
+                std::cout << "secrets " << std::string((char*)scandidate,40) << std::endl;
+
+                keydataAccumulator.old_secrets.insert(std::string((char*)scandidate,40));
+            }
+            scandidate = nullptr;
+            }
+        }
+       //printf("Freeing %p %lu\n",p,sizes[p]);
+        uint8_t* pp = (uint8_t*)p;
+       if (sizes[p] == curOffs.mbox_size)
+       {
+           if (!mbox_saved)
+           {
+              
+               memcpy(&mboxsave[0], pp+8, curOffs.mbox_size-8);//119448
+               mbox_saved = true;
+           }
+       }
+      // std::cout << "Freed: " <<hexStr((uint8_t*)&pp[0], sizes[p]) << std::endl;
+       if (p == scandidate) scandidate = nullptr;
     }
     if (armed)
     {
@@ -2583,7 +2690,7 @@ void pfree(void* p)
                     break;
                 }
             }
-            // std::cout << hexStr((uint8_t*)&pp[0], sizes[p]>32 ? 32 : sizes[p]) << std::endl;
+             //std::cout << hexStr((uint8_t*)&pp[0], sizes[p]>42 ? 42 : sizes[p]) << std::endl;
             if (!brk && pc[41] == 0)
             {
                 std::cout << "secrets " << std::string(pc) << std::endl;
@@ -2614,11 +2721,11 @@ std::list<std::string> splitStringBySubstring(const std::string& str, const std:
 }
 
 
-bool findExec(int lucene)
+bool findExec(int lucene,int entry)
 {
     for (int i = 0; i < knum; i++)
     {
-        if (checkExecs(lucene, kindles[i]))
+        if (checkExecs(lucene, entry,kindles[i]))
         {
             curOffs = kindles[i];
             return true;
@@ -2639,6 +2746,22 @@ bool directoryExistsWinAPI(const std::string& dirName_in)
         return true;   // This is a directory!
 
     return false;      // This is not a directory, but a file
+}
+void* GetModuleEntryPoint(HMODULE hMod) 
+{
+    if (hMod == NULL) return nullptr;
+
+    // 1. Get the DOS Header
+    PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)hMod;
+
+    // 2. Get the NT Headers using the offset from the DOS header
+    PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((BYTE*)hMod + dosHeader->e_lfanew);
+
+    // 3. Get the AddressOfEntryPoint (RVA)
+    DWORD entryPointRVA = ntHeaders->OptionalHeader.AddressOfEntryPoint;
+
+    // 4. Add the RVA to the Base Address (hMod) to get the absolute address
+    return (void*)((BYTE*)hMod + entryPointRVA);
 }
 
 int main(int argc, char* argv[])
@@ -2807,7 +2930,9 @@ int main(int argc, char* argv[])
     toQString toQ = (toQString)GetProcAddress(qtlib, "?fromStdString@QString@@SA?AV1@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
     fromQString fromQ = (fromQString)GetProcAddress(qtlib, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
     int cc = (int)GetProcAddress(kindle, ("??0Analyzer@Lucene@@QAE@ABV01@@Z"));
-    if (!findExec(cc))
+    int centry = (int)GetModuleEntryPoint(kindle);
+    printf("Lucene: %x entry: %x\n ", cc, centry);
+    if (!findExec(cc, centry))
     {
         std::cout << "Could not find supported kindle version, aborting"  << std::endl;
         return 4;
@@ -2817,16 +2942,20 @@ int main(int argc, char* argv[])
         std::cout << "Found Kindle executable of version " << curOffs.version << std::endl;
     }
     stoffset = cc - curOffs.luceneaddr;
+    if (curOffs.luceneaddr == 0)
+    {
+        stoffset = centry - curOffs.entry;
+    }
     printf("Got offset: %x\n", stoffset);
     _initterm_e((_PIFV*)(stoffset + curOffs.initterm_e_start), (_PIFV*)(stoffset + curOffs.initterm_e_end));
-    //printf("Initialized exceptions \n");
+    printf("Initialized exceptions \n");
 
     //flip tlls initialized flag
     ipcall tlsset = (ipcall)(stoffset + curOffs.tls_reset);
     int rt = 1;
     //need to reset tls flag so that static vars would initialize, i think
     tlsset(&rt);
-    //printf("Flipped tls \n");
+    printf("Flipped tls \n");
 
     //init global/static vars
     _PVFV* ppfn = (_PVFV*)(stoffset + curOffs.initterm_start);
@@ -2838,7 +2967,7 @@ int main(int argc, char* argv[])
         }
     } while (ppfn < ppend);
     //_initterm((_PVFV*)(stoffset + initterm_start), (_PVFV*)(stoffset + initterm_end));
-    //printf("Initialized globals \n");
+    printf("Initialized globals \n");
     std::string tokens = std::string("kindle.account.tokens");
     std::string dsn = std::string("DSN");
     vpcall MakeKindleInfoStorage = (vpcall)(stoffset + curOffs.make_storage);
@@ -2893,6 +3022,10 @@ int main(int argc, char* argv[])
     std::basic_string<TCHAR> wfolder_path = std::basic_string<wchar_t>(folder_path.begin(), folder_path.end());// L".\\";
     SetCurrentDirectoryW(old_cwd);
     enumerateKindleDir(wfolder_path.data(), out_dir_path, &serial_candidates, &secret_candidates, k4file);
+    if (curOffs.version == "Kindle 2.9.0(71000)")
+    {
+        std::cout << "WARNING: 2.9.0 K4PC Secret decryption might be unstable. USE k4i file WITH CAUTION. "<< std::endl;
+    }
   //  while (true) {}
 
     
