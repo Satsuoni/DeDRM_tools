@@ -67,6 +67,39 @@ struct ExecOffsets
 };
 
 ExecOffsets curOffs;
+ExecOffsets Kindle291()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0;
+    ret.entry = 0x00002532b9c;
+
+    ret.initterm_e_start = 0x00002add700;
+    ret.initterm_e_end = 0x0002add718; 
+
+    ret.tls_reset = 0x0253222f;
+    ret.initterm_start = 0x002a9a160;
+    ret.initterm_end = 0x002add6fc;       
+
+    ret.make_storage = 0x01386d90;
+    ret.get_storage_value = 0x04b8c80;
+
+    ret.get_plugin_man = 0x017c42b0;
+    ret.load_all = 0x0017c43b0;
+
+    ret.get_factory = 0x0017c3830;
+    ret.open_book = 0x017c3990;
+    ret.drm_provider = 0x017c3cd0;
+    ret.mem_offset = 20;
+
+    ret.decr_offset = 0x020f54f0;
+    ret.mbox_capture = 0x20ee50d;
+
+    ret.mbox_size = 119208;
+    ret.mbox_iv_offset = 0x1d180;
+    ret.version = "Kindle 2.9.1(71006)";
+    return ret;
+}
+
 ExecOffsets Kindle290()
 {
     ExecOffsets ret;
@@ -200,8 +233,8 @@ ExecOffsets Kindle280()
     ret.version = "Kindle 2.8.0(70980)";
     return ret;
 }
-const int knum = 5;
-ExecOffsets kindles[knum] = { Kindle280(),Kindle281(),Kindle282(),Kindle283(),Kindle290()};
+const int knum = 6;
+ExecOffsets kindles[knum] = { Kindle280(),Kindle281(),Kindle282(),Kindle283(),Kindle290(),Kindle291()};
 bool checkExecs(int luceneAddr,int entry, const ExecOffsets& offs)
 {
 
@@ -1379,7 +1412,19 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
         m.name = pszModName;
 
         HINSTANCE hImportDLL;
-        if (main_path == nullptr)
+        hImportDLL = GetModuleHandleA(pszModName);
+        if (hImportDLL != nullptr)
+        {
+            std::cout << "Library already loaded" << std::endl;
+        }
+        else 
+        {
+        hImportDLL = LoadLibraryA(pszModName);
+        }
+        char buffer[2048];
+        GetModuleFileNameA(hImportDLL, buffer, sizeof(buffer));
+      
+        /*if (main_path == nullptr)
             hImportDLL = LoadLibraryA(pszModName);
         else
         {
@@ -1390,7 +1435,7 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
                 hImportDLL = LoadLibraryA(pszModName);
             //else 
              //   std::cout << "Loaded " << pszModName << std::endl;
-        }
+        }*/
         if (std::string(pszModName) == "Qt5Core.dll")
         {
             qtlib = hImportDLL;// LoadLibrary(qt_path);
@@ -1402,6 +1447,8 @@ void ParseIAT(HINSTANCE h, IATRESULTS& res, const std::map<FARPROC, FARPROC>& se
             std::cout << "Could not load DLL " << pszModName << " with error " << GetLastError() << ", please check your paths" << std::endl;
             continue;
         }
+        std::cout << "Loaded dll from path " << buffer << " to address ";
+        printf("%08x\n", hImportDLL);
         m.handle = hImportDLL;
         m.f = IATRESULTS::FAILUREREASON::SUCCESS;
 
@@ -2594,7 +2641,7 @@ void pfree(void* p)
             scandidate = nullptr;
             }
         }
-       //printf("Freeing %p %lu\n",p,sizes[p]);
+      /// printf("Freeing %p %lu\n",p,sizes[p]);
         uint8_t* pp = (uint8_t*)p;
        if (sizes[p] == curOffs.mbox_size)
        {
@@ -2603,6 +2650,7 @@ void pfree(void* p)
               
                memcpy(&mboxsave[0], pp+8, curOffs.mbox_size-8);//119448
                mbox_saved = true;
+               printf("Mbox saved\n");
            }
        }
       // std::cout << "Freed: " <<hexStr((uint8_t*)&pp[0], sizes[p]) << std::endl;
@@ -2764,6 +2812,93 @@ void* GetModuleEntryPoint(HMODULE hMod)
     return (void*)((BYTE*)hMod + entryPointRVA);
 }
 
+
+LONG WINAPI PrintStackTraceFilter(EXCEPTION_POINTERS* pExp) {
+    PEXCEPTION_RECORD pRecord = pExp->ExceptionRecord;
+
+    // Print the exception code and the instruction address where it happened
+    printf("Exception Code: 0x%08X\n", pRecord->ExceptionCode);
+    printf("Exception Address: 0x%p\n", pRecord->ExceptionAddress);
+
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread = GetCurrentThread();
+
+    SymInitialize(process, NULL, TRUE);
+
+    STACKFRAME64 stackFrame = {};
+    DWORD machineType;
+    CONTEXT* context = pExp->ContextRecord;
+
+#ifdef _M_IX86
+    machineType = IMAGE_FILE_MACHINE_I386;
+    stackFrame.AddrPC.Offset = context->Eip;
+    stackFrame.AddrPC.Mode = AddrModeFlat;
+    stackFrame.AddrFrame.Offset = context->Ebp;
+    stackFrame.AddrFrame.Mode = AddrModeFlat;
+    stackFrame.AddrStack.Offset = context->Esp;
+    stackFrame.AddrStack.Mode = AddrModeFlat;
+#elif _M_X64
+    machineType = IMAGE_FILE_MACHINE_AMD64;
+    stackFrame.AddrPC.Offset = context->Rip;
+    stackFrame.AddrPC.Mode = AddrModeFlat;
+    stackFrame.AddrFrame.Offset = context->Rbp;
+    stackFrame.AddrFrame.Mode = AddrModeFlat;
+    stackFrame.AddrStack.Offset = context->Rsp;
+    stackFrame.AddrStack.Mode = AddrModeFlat;
+#endif
+
+    while (StackWalk64(machineType, process, thread, &stackFrame, context,
+        NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+        // Use SymFromAddr here to print function names
+        std::cout << "Address: " << (void*)stackFrame.AddrPC.Offset << std::endl;
+        char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+        PSYMBOL_INFO pSymbol = (PSYMBOL_INFO)buffer;
+        pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        pSymbol->MaxNameLen = MAX_SYM_NAME;
+
+        DWORD64 displacement = 0;
+
+        // 2. Resolve address to symbol
+        // AddrPC.Offset is the current instruction pointer from StackWalk64
+        if (SymFromAddr(process, stackFrame.AddrPC.Offset, &displacement, pSymbol)) {
+            printf("Frame: %s + 0x%llx (Address: 0x%llx)\n",
+                pSymbol->Name, displacement, pSymbol->Address);
+        }
+        else {
+            printf("Frame: [Unknown Symbol] (Address: 0x%llx)\n", stackFrame.AddrPC.Offset);
+        }
+        IMAGEHLP_MODULE64 moduleInfo = { 0 };
+        moduleInfo.SizeOfStruct = sizeof(IMAGEHLP_MODULE64);
+
+        if (SymGetModuleInfo64(process, stackFrame.AddrPC.Offset, &moduleInfo)) {
+            // moduleInfo.ModuleName contains the short name (e.g., "ntdll")
+            // moduleInfo.ImageName contains the full path (e.g., "C:\Windows\System32\ntdll.dll")
+            DWORD64 moduleBase = SymGetModuleBase64(process, stackFrame.AddrPC.Offset);
+            printf("Module: %s %08llx + %08llx (ghidra: %08llx)\n", moduleInfo.ImageName, moduleBase,stackFrame.AddrPC.Offset- moduleInfo.BaseOfImage, stackFrame.AddrPC.Offset - moduleInfo.BaseOfImage+0x400000);
+        }
+        printf("----\n");
+    }
+
+    SymCleanup(process);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+int fake_initterm(_PVFV* ppfn, _PVFV* ppend)
+{
+    do {
+        if (_PVFV pfn = *++ppfn) {
+          //  printf("Running initializer %x\n", (int)pfn - stoffset);
+            __try {
+                pfn();
+            }
+            __except (PrintStackTraceFilter(GetExceptionInformation())) {
+                printf("Ignored exception in the handler block.\n");
+                exit(0);
+            }
+        }
+    } while (ppfn < ppend);
+    return 0;
+}
 int main(int argc, char* argv[])
 {
     PWSTR localcappdata = NULL;
@@ -2893,7 +3028,7 @@ int main(int argc, char* argv[])
     std::map<std::string, FARPROC> replsName;
     replsName["memset"]= (FARPROC)&pmemset;
     replsName["memcpy"] = (FARPROC)&pmemcpy;
-    replsName["memmove"] = (FARPROC)&pmemcpy;
+   //replsName["memmove"] = (FARPROC)&pmemcpy;
     ParseIAT(kindle, res, repls, replsName); //patch and replace symbols
     SetCurrentDirectoryW(old_cwd); //return back to original dir
     if (kindle == nullptr)
@@ -2960,12 +3095,7 @@ int main(int argc, char* argv[])
     //init global/static vars
     _PVFV* ppfn = (_PVFV*)(stoffset + curOffs.initterm_start);
     _PVFV* ppend = (_PVFV*)(stoffset + curOffs.initterm_end);
-    do {
-        if (_PVFV pfn = *++ppfn) {
-            //printf("Running initializer %x\n",(int)pfn-stoffset);
-            pfn();
-        }
-    } while (ppfn < ppend);
+    fake_initterm(ppfn,ppend);
     //_initterm((_PVFV*)(stoffset + initterm_start), (_PVFV*)(stoffset + initterm_end));
     printf("Initialized globals \n");
     std::string tokens = std::string("kindle.account.tokens");
