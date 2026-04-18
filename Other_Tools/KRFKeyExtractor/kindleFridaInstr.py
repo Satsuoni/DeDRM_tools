@@ -790,7 +790,8 @@ onEnter (args) {
 this.sz=parseInt(args[0],16);
 },
 onLeave(retval) {
-allocations[str(retval)]=this.sz;
+if (this.sz<4000)
+  allocations[str(retval)]=this.sz;
 }
 });
 Interceptor.attach(freePtr, 
@@ -802,7 +803,7 @@ Interceptor.attach(freePtr,
     if (addr in allocations) {
         let p=new NativePointer(addr);
         let ln=allocations[addr];
-        if (ln>0 && ln<2000) 
+        if (ln>0 && ln<3000) 
        {
        let arr=p.readByteArray(ln);
        //console.log(hex(arr));

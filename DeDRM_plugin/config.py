@@ -11,7 +11,7 @@ import sys, os, traceback, json, codecs, base64, time
 from PyQt5.Qt import (Qt, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
                       QGroupBox, QPushButton, QListWidget, QListWidgetItem, QCheckBox,
                       QAbstractItemView, QIcon, QDialog, QDialogButtonBox, QUrl, 
-                      QCheckBox, QComboBox)
+                      QCheckBox, QComboBox, QMessageBox)
 
 from PyQt5 import Qt as QtGui
 from zipfile import ZipFile
@@ -246,24 +246,29 @@ class ConfigWidget(QWidget):
         skipped = 0
         if files:
             for filename in files:
-                #print(filename)
+                print(filename)
                 fpath = os.path.join(config_dir, filename)
                 filename = os.path.basename(filename)
                 new_key_name = os.path.splitext(os.path.basename(filename))[0]
                 goodenough=False
                 print(fpath)
+                cnt=3
                 with open(fpath,'r') as keyfile:
-                    for line in keyfile: #just check one
+                    for line in keyfile: #just check three
                         sline=line.strip()
                         ls=sline.split("$")
                         #print(ls)
                         if len(ls)>1:
                             goodenough=True
-                        break
+                        cnt-=1
+                        if cnt<=0:
+                          break
                 if goodenough:
                     self.tempdedrmprefs['kindleextrakeyfile']=fpath
                     self._extrakeyfile_ledit.setText(fpath)
                     counter=1
+                else:
+                  QMessageBox.warning(self, 'Warning', 'This file ('+fpath+') does not seem to contain keys')
         return counter > 0
     def kindle_serials(self):
         d = ManageKeysDialog(self,"EInk Kindle Serial Number",self.tempdedrmprefs['serials'], AddSerialDialog)
