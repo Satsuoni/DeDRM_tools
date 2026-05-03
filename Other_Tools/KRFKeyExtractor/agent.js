@@ -55,9 +55,9 @@ var sp=utils.getFactory().getAccountSecretProvider();
    var ActivityThread = Java.use('android.app.ActivityThread');
    var currentApplication = ActivityThread.currentApplication();
    var context = currentApplication.getApplicationContext();
-   console.log("App Context: " + context);
+   //console.log("App Context: " + context);
     
-    console.log(context.getApplicationInfo().nativeLibraryDir);
+    //console.log(context.getApplicationInfo().nativeLibraryDir);
     var liblist=ArrayList.$new();
     liblist.add(context.getApplicationInfo().nativeLibraryDir.value);
     krf.initKRF(liblist);
@@ -70,12 +70,12 @@ function openBook(bookMessage)
 
 Java.perform(function () {
  const allocations={};
- var bkfl=cfile.$new("/storage/emulated/0/Android/data/com.amazon.kindle/files/"+bookMessage.bookFile);///B08XZRCSWS/CR!2ZWXQ3N96S5QQ3WH9418AC6DE9MZ.kfx")
+ var bkfl=cfile.$new("/storage/emulated/0/Android/data/com.amazon.kindle/files/"+bookMessage.bookFile);
  var emptyList=ArrayList.$new();
 var voucherList=ArrayList.$new();
 bookMessage.vouchers.forEach((voucher) => 
 {
-var bkvch=cfile.$new("/storage/emulated/0/Android/data/com.amazon.kindle/files/"+voucher);//B08XZRCSWS/amzn1.drm-voucher.v1.5fe7146c-e3b1-4841-ab4c-3c305bcaa77a.ast")
+var bkvch=cfile.$new("/storage/emulated/0/Android/data/com.amazon.kindle/files/"+voucher);
   voucherList.add(bkvch);
 }
 );
@@ -113,11 +113,12 @@ var freeListener=Interceptor.attach(freePtr,
     }
   }
 })
-
+console.log("Opening book");
+console.log("voucherList");
 var book=krf.openBook(bkfl,secrs ,dsn,voucherList,emptyList);
 
 //console.log("meh");
-//console.log(book.class);
+console.log(book.class);
 
 //console.log(Object.keys(allocations).length);
 Object.keys(allocations).forEach(key => {
@@ -129,8 +130,8 @@ Object.keys(allocations).forEach(key => {
     send("mem",arr);
   }
 });
-freeListener.detach();
-allocListener.detach();
+//freeListener.detach();
+//allocListener.detach();
 send("done");
 }); 
 recv('book', openBook);

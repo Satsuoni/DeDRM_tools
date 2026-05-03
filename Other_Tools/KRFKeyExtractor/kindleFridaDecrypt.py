@@ -1406,4 +1406,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         pass
-#https://www.geeksforgeeks.org/python/python-os-scandir-method/

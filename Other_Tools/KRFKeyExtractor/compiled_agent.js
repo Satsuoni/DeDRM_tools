@@ -1,5 +1,5 @@
 📦
-443493 /agent.js
+443428 /agent.js
 ✄
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
@@ -13530,8 +13530,6 @@ frida_java_bridge_default.perform(function() {
   var ActivityThread = frida_java_bridge_default.use("android.app.ActivityThread");
   var currentApplication = ActivityThread.currentApplication();
   var context = currentApplication.getApplicationContext();
-  console.log("App Context: " + context);
-  console.log(context.getApplicationInfo().nativeLibraryDir);
   var liblist = ArrayList.$new();
   liblist.add(context.getApplicationInfo().nativeLibraryDir.value);
   krf.initKRF(liblist);
@@ -13580,7 +13578,10 @@ function openBook(bookMessage) {
         }
       }
     );
+    console.log("Opening book");
+    console.log("voucherList");
     var book = krf.openBook(bkfl, secrs, dsn, voucherList, emptyList);
+    console.log(book.class);
     Object.keys(allocations).forEach((key) => {
       if (allocations[key] == 16) {
         let p = new NativePointer(key);
@@ -13588,8 +13589,6 @@ function openBook(bookMessage) {
         send("mem", arr);
       }
     });
-    freeListener.detach();
-    allocListener.detach();
     send("done");
   });
   recv("book", openBook);
