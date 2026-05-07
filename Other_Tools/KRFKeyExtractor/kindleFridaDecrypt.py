@@ -1360,7 +1360,7 @@ def send_next_book(app):
   if nxt is None:
     app._exit(0)
     return
-  print(f"Starting work on {nxt["bookid"]}")
+  print(f'Starting work on {nxt["bookid"]}')
   cur_book=nxt
   app._script.post({"type": "book","bookFile":nxt["bookFile"],"vouchers":nxt["vouchers"]})
   processing_book=True
@@ -1388,7 +1388,7 @@ def on_message(payload, data,app):
       if isinstance(payload,dict):
         if payload["msg"]=="ready":
           ready_to_book=True
-          print(f"DSN: {payload["dsn"]} secrets: {payload["secrets"]}")
+          print(f'DSN: {payload["dsn"]} secrets: {payload["secrets"]}')
           scandir_iterator=os.scandir(args.scan_dir)
           send_next_book(app)
           
