@@ -809,29 +809,35 @@ class DrmIon(object):
                           if self.skeylist is not None:
                             done=0
                             lkey=None
+                            vkey=[]
                             for key in self.skeylist:
                               try:
                                 self.processpage(ct, civ, outpages, decompress, decrypt,key)
                                 done+=1
+                                vkey.append(key)
                                 lkey=key
                                 print(f"Got key candidate {key.hex()}")
                                 #break
                               except Exception as e:
                                 #print(e)
                                 continue
-                            if done>1:
+                            nkey=vkey
+                            if len(vkey)>1:
                               done=0
                               lkey=None
-                              for key in self.skeylist:
+                              nkey=[]
+                              for key in vkey:
                                 try:
                                   self.processpage(ct, civ, outpages, decompress, decrypt,key,True)
                                   done+=1
                                   lkey=key
+                                  nkey.append(key)
                                   print(f"Got dedup key candidate {key.hex()}")
                                   #break
                                 except Exception as e:
                                   #print(e)
                                   continue
+                            self.skeylist=nkey
                             _assert(done==1, f"Could not find key in list of {len(self.skeylist)} keys or duplicate keys ({done})")
                             self.key=lkey
                           else:
@@ -887,6 +893,26 @@ class DrmIon(object):
             cont_check=False
 
 def processBook(bookfilelist, keylist,bookid):
+  while len(keylist)>1:
+    print("reducing key  ")
+    for filename,outfilename in bookfilelist:
+      with open(filename,"rb") as fh:
+        data = fh.read(8)
+        if data != b'\xeaDRMION\xee':
+            continue
+        data += fh.read()
+        outfile = BytesIO()
+        ion=DrmIon(BytesIO(data[8:-8]), lambda name: name,keylist)
+        try:
+          ion.parse(outfile)
+        except Exception as e:
+          print(e)
+        keylist=ion.skeylist
+        if len(keylist)<=1: break
+  if len(keylist)==0:
+    print("no keys...")
+    return
+  print("Key reduced to {0}".format(keylist[0].hex()))
   with zipfile.ZipFile(os.path.join(args.out_dir,f'{bookid}.kfx-zip'), 'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as zip_ref:
     for filename,outfilename in bookfilelist:
       with open(filename,"rb") as fh:
@@ -898,6 +924,9 @@ def processBook(bookfilelist, keylist,bookid):
         print("Decrypting KFX DRMION: {0}".format(filename))
         outfile = BytesIO()
         DrmIon(BytesIO(data[8:-8]), lambda name: name,keylist).parse(outfile)
+        ion=DrmIon(BytesIO(data[8:-8]), lambda name: name,keylist)
+        ion.key=keylist[0]
+        
         zip_ref.writestr(outfilename, outfile.getvalue())
     print("Book processing complete")
 
@@ -1365,6 +1394,7 @@ def send_next_book(app):
   app._script.post({"type": "book","bookFile":nxt["bookFile"],"vouchers":nxt["vouchers"]})
   processing_book=True
   key_set=set([])
+
 def on_message(payload, data,app):
     global ready_to_book,processing_book,key_set,scandir_iterator,cur_book
     if payload=="mem":
