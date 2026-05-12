@@ -5,29 +5,21 @@
     "priority": -1,
     "items": [
     {
-       "name": "Dedrm KFX (verbose) (old ABI)", 
-            "priority": 1,
-       "action": "bin/run_cmd.sh",
-        "params":"/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_old"
+       "name": "Dedrm all KFX", 
+        "priority": 1,
+       "action": "bin/run_cmd.sh"
     },
         {
-       "name": "Dedrm KFX (verbose) (cxx11 ABI)", 
-            "priority": 2,
+       "name": "Create keyfile for KFX", 
+        "priority": 2,
        "action": "bin/run_cmd.sh",
         "params":"/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_c11"
     },
-    {
-       "name": "Dedrm KFX-HF (verbose)(old ABI)", 
-            "priority": 4,
-       "action": "bin/run_cmd.sh",
-       "params":"/mnt/us/extensions/kfxdedrm/bin/kfxdedrmhf_static_old"
-    },
-    {
-       "name": "Dedrm KFX-HF (verbose)(cxx11 ABI)", 
-            "priority": 5,
-       "action": "bin/run_cmd.sh",
-       "params":"/mnt/us/extensions/kfxdedrm/bin/kfxdedrmhf_static_c11"
-    }
+    {"name": "Books", "priority":6,
+      "items": [
+         {"name":"Scan documents folder","action": "bin/run_cmd.sh","params":"scan", "priority":1}
+       ]
+     }
 
    ]
   }

@@ -18,9 +18,11 @@
 #define POCKETLZMA_LZMA_C_DEFINE
 #include "plusaes.hpp" //https://github.com/kkAyataka/plusaes/releases
 #include "pocketlzma.hpp" //https://github.com/SSBMTonberry/pocketlzma ,but needs fixing, in decompress, replace (value << (i * 8)); with ((size_t)value << (i * 8));
+#include "json.hpp"
+
 
 namespace fs = ghc::filesystem;
-
+using json=nlohmann::json;
 
 static std::string hexStr(const uint8_t *data, int len)
 {
@@ -1204,7 +1206,7 @@ bool processPage(std::vector<uint8_t> &ciphertext, std::vector<uint8_t> &iv, Bas
   printf("LZMA decompression failed!\n"); // maybe throw?
   return false;
 }
-bool processDRMION(char *buf, size_t size, BasicDecryptor *decr, std::vector<uint8_t> &out, bool &has_encryption)
+bool processDRMION(char *buf, size_t size, BasicDecryptor *decr, std::vector<uint8_t> &out, bool &has_encryption, std::string& keyname)
 {
   BinaryIonParser bp((unsigned char *)buf, size, -1);
   addprottable(&bp);
@@ -1237,6 +1239,20 @@ bool processDRMION(char *buf, size_t size, BasicDecryptor *decr, std::vector<uin
       bp.next();
       std::string nm = bp.gettypename();
       // printf("Typename %s\n",nm.c_str());
+      if (nm == "com.amazon.drm.EnvelopeMetadata@1.0" || nm == "com.amazon.drm.EnvelopeMetadata@2.0")
+      {
+         //printf("Typename %s\n",nm.c_str());
+        bp.stepin();
+        while (bp.hasnext())
+        {
+          bp.next();
+          std::string tn = bp.getfieldname();
+          //printf("Inner fieldname %s\n",tn.c_str());
+          if (tn == "encryption_key") keyname = bp.stringvalue();
+        
+        }
+        bp.stepout();
+      }
       if (nm == "com.amazon.drm.EncryptedPage@1.0" || nm == "com.amazon.drm.EncryptedPage@2.0")
       {
         has_encryption = true;
@@ -1354,13 +1370,13 @@ bool get_drmion(const fs::path &path, std::vector<char> &buf)
   }
   return false;
 }
-std::vector<std::vector<uint8_t>> test_drmions_for_keys(const std::vector<fs::path> &paths, const std::vector<std::vector<uint8_t>> &keys)
+std::vector<std::vector<uint8_t>> test_drmions_for_keys(const std::vector<fs::path> &paths, const std::vector<std::vector<uint8_t>> &keys,std::string& keyname)
 {
   std::vector<std::vector<uint8_t>> ret = keys;
   bool found_encryption = false;
   if (keys.size() == 0)
   {
-    printf("No key candidates!");
+    printf("No key candidates!\n");
     return ret;
   }
   for (const auto &file : paths)
@@ -1377,7 +1393,7 @@ std::vector<std::vector<uint8_t>> test_drmions_for_keys(const std::vector<fs::pa
     {
       AesDecryptor decr(*key);
       // std::cout <<"Got decr " << hexStr(&(*key)[0],16) <<std::endl;
-      if (processDRMION(&drmion[8], drmion.size() - 16, &decr, outme, has_encryption))
+      if (processDRMION(&drmion[8], drmion.size() - 16, &decr, outme, has_encryption,keyname))
       {
         ++key;
       }
@@ -1419,13 +1435,13 @@ int processFile(const char *outputFile, const std::string &fname, const std::str
   {
     return 0;
   }
-
+   std::string discard;
   if (bl > drmionHeader.size() && memcmp(&drmionHeader[0], buf.data(), drmionHeader.size()) == 0)
   {
     std::vector<uint8_t> outme;
     printf("Decrypting DRMION... \n");
     bool has_enc;
-    if (processDRMION(&buf[8], bl - 16, decr, outme, has_enc))
+    if (processDRMION(&buf[8], bl - 16, decr, outme, has_enc,discard))
     {
       mz_bool status =
           mz_zip_add_mem_to_archive_file_in_place(outputFile, archivedName.c_str(), outme.data(), outme.size(), NULL, 0, MZ_BEST_COMPRESSION);
@@ -1623,10 +1639,52 @@ std::vector<std::string> split_secrets(const std::string& secrfile)
 
     return result;
 }
+
+void updatemenufile(const std::vector<fs::path>&books)
+{
+  std::string expected_menu="/mnt/us/extensions/kfxdedrm/menu.json";
+   std::ifstream file(expected_menu);
+    if (!file.is_open())
+    {
+      throw std::runtime_error("Could not open file /mnt/us/extensions/kfxdedrm/menu.json for reading");
+    }
+    printf("Trying to update menu with %zu books \n",books.size());
+    json data = json::parse(file);
+    json alist=json::array();
+    alist.push_back({{"name","Scan documents folder"},{"action", "bin/run_cmd.sh"},{"params","scan"},{"priority",1}});
+    int p=2;
+    for(const auto& pth:books)
+    {
+      std::string bname=pth.stem();
+      std::string fpath=pth.string();
+      alist.push_back({{"name",bname},{"action", "bin/run_cmd.sh"},{"params",std::string("dedrm \"")+fpath+"\""},{"priority",p}});
+      p++;
+    }
+    if (data.contains("items") && data["items"].is_array()) 
+   {
+     for(auto& sub:data["items"])
+     {
+       if (sub.contains("items") && sub["items"].is_array()) 
+   {
+    for (auto& itm :sub["items"])
+    {
+      if (itm.contains("name")&&itm["name"].get<std::string>()=="Books")
+      {
+        printf("Found books \n");
+        itm["items"]=alist;
+        break;
+      }
+    }
+   }
+     }
+   }
+    file.close();
+    std::ofstream outfile(expected_menu);
+    outfile << data.dump(2); 
+}
 int main(int argc, char *argv[])
 {
   printf("Kindle reader , %d arguments\n", argc);
-  fs::path datafolder{"/data/data/com.amazon.kindle/"};
   std::vector<fs::path> infolders;
   std::vector<fs::path> infiles;
   fs::path out_folder{"/mnt/us/dedrm"};
@@ -1634,7 +1692,76 @@ int main(int argc, char *argv[])
 
   std::string jdsn;
   std::vector<std::string> jsecrets;
- 
+  std::string mode="decrypt_all";
+  fs::path sngl;
+  if (argc>1)
+  {
+    std::string cmd=argv[1];
+    if(cmd=="test") mode="test";
+    if(cmd=="scan") mode="scan";
+    if(cmd=="keyfile") mode="keyfile";
+    if(cmd=="dedrm") 
+    {
+      if(argc<3)
+      {
+        printf("Requires two arguments, command and book name\n");
+        return 2;
+      }
+      mode="decrypt_one";
+      sngl=fs::path(std::string(argv[2]));
+    }
+  }
+  if(mode=="scan")
+  {
+    for (auto &inpath : infolders)
+    {
+    scan_folder_for_book_candidates(inpath, infiles);
+    }
+    updatemenufile(infiles);
+    return 0;
+  }
+  // open shared library
+  fs::path libPath;
+  void *prn =  dlopen("libYJSDK-shared.so", RTLD_LAZY);
+  if (prn == nullptr)
+  {
+    printf("Could not open shared library at :  %s\n", dlerror());
+    return 2;
+  }
+  typedef void (*getinst)(std::shared_ptr<void*>&res);
+  getinst getsec=(getinst)dlsym(prn, "_ZN5yjsdk13IBookSecurity11getInstanceERSt10shared_ptrIS0_E");
+   std::shared_ptr<void*> booksec;
+  getsec(booksec);
+  if(booksec.get()==nullptr)
+  {
+    printf("Could not get booksec");
+    return 3;
+  }
+  void** vtable=*(void***)booksec.get();
+  typedef void (*setParams)( void*,std::map<std::string,std::vector<std::string>>&p);
+  setParams setSec=(setParams)vtable[4];
+  typedef void (*attachVouch)( void*,const char* );
+  attachVouch attachv=(attachVouch)vtable[5];
+  std::string clientid=read_file_to_string("/proc/usid");
+  void *pv = dlsym(prn, "_ZN5yjsdk11BookFactory7getBookEPKcSt10shared_ptrINS_13IBookSecurityEERS3_INS_12IDigitalBookEE");
+  if(pv==nullptr)
+  {
+    printf("Could not find getBook, check libYJSDK-shared.so library variant\n");
+    return 4;
+  }
+  if(mode=="test")
+  {
+    std::map<std::string,std::vector<std::string>> testpars;
+    std::vector<std::string> clientids;
+    std::vector<std::string> fakesecrets;
+    fakesecrets.push_back("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    fakesecrets.push_back("ffffffffffffffffffffffffffffffff");
+    clientids.push_back(clientid);
+    testpars["CLIENT_ID"]=clientids;
+    testpars["ACCOUNT_SECRET"]=fakesecrets;
+    setSec(booksec.get(),testpars); //it would throw if incompatible, hopefully;
+    return 0;
+  }
   
   std::cout << "Selected Out folder: " << out_folder << std::endl;
 
@@ -1649,26 +1776,20 @@ int main(int argc, char *argv[])
     printf("Output folder %s could not be created or is a file\n", out_folder.string().c_str());
     return -3;
   }
-  // open shared library
+  
 
-  fs::path libPath;
-  void *prn =  dlopen("libYJSDK-shared.so", RTLD_LAZY);
-  if (prn == nullptr)
-  {
-    printf("Could not open shared library at :  %s\n", dlerror());
-    return 2;
-  }
+  
 
 // ibooksec getinstance _ZN5yjsdk13IBookSecurity11getInstanceERSt10shared_ptrIS0_E
-  std::shared_ptr<void*> booksec;
-  std::string clientid=read_file_to_string("/proc/usid");
+ 
+  
   std::string sz="sizelarge";
-  printf("usid length %zu strind legnth: %zu\n",clientid.size(),sizeof(sz));
+  printf("usid length %zu string legnth: %zu\n",clientid.size(),sizeof(sz));
   std::map<std::string,std::vector<std::string>> secpars;
   std::vector<std::string> cl1;
   std::string secrcomb=read_file_to_string("/var/local/java/prefs/acsr");
   std::vector<std::string> asecrets;
-  std::cout << "DSN" <<clientid <<std::endl;
+  std::cout << "DSN " <<clientid <<std::endl;
   if(secrcomb.size()>2)
   {
     asecrets=split_secrets(secrcomb);
@@ -1680,35 +1801,39 @@ int main(int argc, char *argv[])
   cl1.push_back(clientid);
   secpars["CLIENT_ID"]=cl1;
   secpars["ACCOUNT_SECRET"]=asecrets;
-  typedef void (*getinst)(std::shared_ptr<void*>&res);
-  getinst getsec=(getinst)dlsym(prn, "_ZN5yjsdk13IBookSecurity11getInstanceERSt10shared_ptrIS0_E");
   install_hook((void*)getsec);
-  getsec(booksec);
+  
   printf("Booksec: %p\n",booksec.get());
-  void** vtable=*(void***)booksec.get();
+  
   printf("Vtable: %p\n",vtable);
-  typedef void (*setParams)( void*,std::map<std::string,std::vector<std::string>>&p);
-  setParams setSec=(setParams)vtable[4];
-  //set lock parameters
-  //setSec(booksec.get(),secpars);
-  //attach vouchers
-  typedef void (*attachVouch)( void*,const char* );
-  attachVouch attachv=(attachVouch)vtable[5];
-  void *pv = dlsym(prn, "_ZN5yjsdk11BookFactory7getBookEPKcSt10shared_ptrINS_13IBookSecurityEERS3_INS_12IDigitalBookEE");
+  
   printf("Found getbook %p \n", pv);
  
  typedef int (*getbook1)(const char *,std::shared_ptr<void*>&booksec, std::shared_ptr<void*>&);
   getbook1 gb=(getbook1)pv;
-
+  if(mode=="decrypt_one")
+  {
+    infiles.clear();
+    infiles.push_back(sngl);
+  }
+  
+  if(mode=="decrypt_all" ||mode=="keyfile")
+  {
   for (auto &inpath : infolders)
   {
     scan_folder_for_book_candidates(inpath, infiles);
   }
+  }
+std::ofstream outkeyfile;
+ if(mode=="keyfile")
+ {
+   outkeyfile.open("/mnt/us/dedrm/keyfile.txt");
+ }
   key_candidates.clear();
   for (auto &itm : infiles)
   {
     fs::path metadata_path = itm ;
-    std::string bookid = itm.filename().string();
+    std::string bookid = itm.stem().string();
     std::cout << bookid << std::endl;
     std::map<std::string, std::vector<fs::path>> metadata;
     if (process_assets(bookid, itm, metadata))
@@ -1735,11 +1860,31 @@ int main(int argc, char *argv[])
       allocations.clear();
       std::vector<std::vector<uint8_t>> keyset(key_candidates.begin(), key_candidates.end());
       std::cout << keyset.size() << " key candidates" << std::endl;
-      std::vector<std::vector<uint8_t>> result = test_drmions_for_keys(metadata["resources"], keyset);
+      bool no_enc=false;
+      if(keyset.size()==0) 
+      {
+        no_enc=true;
+        std::vector<uint8_t> dummy(16);
+        keyset.push_back(dummy);
+      }
+      std::string keyname;
+      std::vector<std::vector<uint8_t>> result = test_drmions_for_keys(metadata["resources"], keyset,keyname);
+      std::cout <<"Key name: " <<keyname <<std::endl;
       if (result.size() == 1)
       {
 
         std::cout << "Found key: " << hexStr(result[0].data(), 16) << std::endl;
+        if(mode=="keyfile")
+        {
+          if(!no_enc)
+          {
+        printf("Adding to keyfile\n");
+        outkeyfile << keyname<<"$secret_key:"<< hexStr(result[0].data(), 16) <<std::endl;
+          }
+         
+        }
+        else 
+        {
         AesDecryptor decr(result[0]);
         fs::path output_path = out_folder / fs::path(bookid + ".kfx-zip");
         std::cout << "Generating " << output_path << std::endl;
@@ -1747,6 +1892,7 @@ int main(int argc, char *argv[])
         for (auto fl : metadata["resources"])
         {
           processFile(output_path.string().c_str(), fl.string(), fl.filename().string(), &decr);
+        }
         }
         printf("Book processed \n");
       }
@@ -1758,5 +1904,9 @@ int main(int argc, char *argv[])
       std::cout << "Invalid or unsupported metadata" << std::endl;
     }
   }
+   if(mode=="keyfile")
+ {
+   outkeyfile.close();
+ }
   printf("DeDRM all done.\n");
 }

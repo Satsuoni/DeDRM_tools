@@ -1,9 +1,9 @@
 //---------------------------------------------------------------------------------------
 //
 // ghc::filesystem - A C++17-like filesystem implementation for C++11/C++14/C++17/C++20
-//
-//---------------------------------------------------------------------------------------
 // https://github.com/gulrak/filesystem/blob/master/LICENSE
+//---------------------------------------------------------------------------------------
+//
 // Copyright (c) 2018, Steffen Schümann <s.schuemann@pobox.com>
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy

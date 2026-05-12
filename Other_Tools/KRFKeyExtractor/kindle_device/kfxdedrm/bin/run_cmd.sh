@@ -83,8 +83,27 @@ logmsg() {
     echo "${1}"
 }
 
+check_exec() {
+  exect=$1
+  $exect test &>/dev/null
+  status=$?
+  if [[ "$status" -eq 0 ]]; then
+    echo $exect
+    else
+    echo ""
+    fi
+}
 
-"$1" 2>&1 | while read -r line; do
+executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_old" ) 
+[[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_c11")
+[[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrmhf_old")
+[[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrmhf_c11")
+if [[ -z "$executable" ]]; then
+  eips_print_bottom_centered "No working executable found" 1
+  exit 1
+fi
+echo $executable
+"$executable" ${@} 2>&1 | while read -r line; do
     logmsg "$line"
     eips_print_bottom_centered "$line" 1
 done

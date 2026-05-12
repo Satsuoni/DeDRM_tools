@@ -33,7 +33,7 @@
 	Example:
 	#define POCKETLZMA_LZMA_C_DEFINE
 	#include "pocketlzma.hpp"
-https://github.com/SSBMTonberry/pocketlzma/blob/main/LICENSE
+  https://github.com/SSBMTonberry/pocketlzma/blob/main/LICENSE
  */
 #ifndef POCKETLZMA_POCKETLZMA_H
 #define POCKETLZMA_POCKETLZMA_H
