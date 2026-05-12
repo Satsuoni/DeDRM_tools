@@ -13,7 +13,7 @@
        "name": "Create keyfile for KFX", 
         "priority": 2,
        "action": "bin/run_cmd.sh",
-        "params":"/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_c11"
+        "params":"keyfile"
     },
     {"name": "Books", "priority":6,
       "items": [

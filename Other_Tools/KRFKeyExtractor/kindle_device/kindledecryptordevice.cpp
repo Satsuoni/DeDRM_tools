@@ -1520,6 +1520,10 @@ void scan_folder_for_book_candidates(const fs::path &collection, std::vector<fs:
            book_folders.push_back(entry.path());
          }
       }
+      if(fs::is_directory(entry.path())&&entry.path().extension()!=".sdr")
+      {
+        scan_folder_for_book_candidates(entry.path(),book_folders);
+      }
     
     
   }
