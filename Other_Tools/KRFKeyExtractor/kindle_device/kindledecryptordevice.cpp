@@ -24,6 +24,32 @@
 namespace fs = ghc::filesystem;
 using json=nlohmann::json;
 
+inline void ltrim(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+            std::not1(std::ptr_fun<int, int>(std::isspace))));
+}
+
+// Trim from the end (in place)
+inline void rtrim(std::string &s) {
+    s.erase(std::find_if(s.rbegin(), s.rend(),
+            std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
+}
+
+
+inline void trim(std::string &s) {
+    rtrim(s);
+    ltrim(s);
+}
+
+void remove_non_alphanumeric(std::string& str) {
+    str.erase(
+        std::remove_if(str.begin(), str.end(), [](unsigned char c) {
+            return !std::isalnum(c);
+        }), 
+        str.end()
+    );
+}
+
 static std::string hexStr(const uint8_t *data, int len)
 {
 
@@ -1588,10 +1614,12 @@ aesDecrypt aesDecrypt_real;
 keylen key_len_real;
 int aesDecrypt_new(void*ctx,void*cipher,void*impl,char*key,char*iv)
 {
+   printf("AES decrypt called with key len %d\n",key_len_real(cipher));
+     std::cout <<hexStr((const unsigned char*)key,key_len_real(cipher))<<std::endl;
   if(key_len_real(cipher)==16)
   {
   printf("AES decrypt called %p\n",aesDecrypt_real);
-  std::cout <<hexStr((const unsigned char*)key,16)<<std::endl;
+
   //std::vector<char> vec(data, data + length);
   key_candidates.insert(std::vector<uint8_t>((uint8_t *)key, (uint8_t *)key + 16));
   }
@@ -1744,9 +1772,11 @@ int main(int argc, char *argv[])
   void** vtable=*(void***)booksec.get();
   typedef void (*setParams)( void*,std::map<std::string,std::vector<std::string>>&p);
   setParams setSec=(setParams)vtable[4];
-  typedef void (*attachVouch)( void*,const char* );
+  typedef int (*attachVouch)( void*,const char* );
   attachVouch attachv=(attachVouch)vtable[5];
   std::string clientid=read_file_to_string("/proc/usid");
+  trim(clientid);
+  remove_non_alphanumeric(clientid);
   void *pv = dlsym(prn, "_ZN5yjsdk11BookFactory7getBookEPKcSt10shared_ptrINS_13IBookSecurityEERS3_INS_12IDigitalBookEE");
   if(pv==nullptr)
   {
@@ -1849,7 +1879,7 @@ std::ofstream outkeyfile;
        setSec(nbooksec.get(),secpars);
        for(auto&v:metadata["vouchers"])
        {
-        attachv(nbooksec.get(),v.string().c_str());
+        printf("Attaching voucher: %d\n",attachv(nbooksec.get(),v.string().c_str()));
        }
        std::cout << metadata["bookFiles"][0]<<std::endl;
       int res= gb(metadata["bookFiles"][0].string().c_str(),nbooksec,nbook);
