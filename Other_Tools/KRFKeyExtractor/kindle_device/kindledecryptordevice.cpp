@@ -1754,7 +1754,7 @@ int main(int argc, char *argv[])
   }
   // open shared library
   fs::path libPath;
-  void *prn =  dlopen("libYJSDK-shared.so", RTLD_LAZY);
+  void *prn =  dlopen("libYJSDK-shared.so", RTLD_LAZY);//dlopen("/mnt/us/extensions/kfxdedrm/bin/libYJSDK-voyage-shared.so", RTLD_LAZY);;//
   if (prn == nullptr)
   {
     printf("Could not open shared library at :  %s\n", dlerror());
@@ -1762,6 +1762,16 @@ int main(int argc, char *argv[])
   }
   typedef void (*getinst)(std::shared_ptr<void*>&res);
   getinst getsec=(getinst)dlsym(prn, "_ZN5yjsdk13IBookSecurity11getInstanceERSt10shared_ptrIS0_E");
+  if(getsec==nullptr)
+  {
+    printf("Could not get book security normally, trying older function\n");
+    getsec=(getinst)dlsym(prn, "_ZN5yjsdk13IBookSecurity11getInstanceERNS_9SharedPtrIS0_EE");
+    if (getsec==nullptr)
+    {
+      printf("Could not find security getInstance,bailing\n");
+      return 3;
+    }
+  }
    std::shared_ptr<void*> booksec;
   getsec(booksec);
   if(booksec.get()==nullptr)
@@ -1780,8 +1790,13 @@ int main(int argc, char *argv[])
   void *pv = dlsym(prn, "_ZN5yjsdk11BookFactory7getBookEPKcSt10shared_ptrINS_13IBookSecurityEERS3_INS_12IDigitalBookEE");
   if(pv==nullptr)
   {
+    printf("Could not find getBook normally, trying older function\n");
+    pv = dlsym(prn,"_ZN5yjsdk11BookFactory7getBookEPKcNS_9SharedPtrINS_13IBookSecurityEEERNS3_INS_12IDigitalBookEEE");
+    if(pv==nullptr)
+    {
     printf("Could not find getBook, check libYJSDK-shared.so library variant\n");
     return 4;
+    }
   }
   if(mode=="test")
   {
