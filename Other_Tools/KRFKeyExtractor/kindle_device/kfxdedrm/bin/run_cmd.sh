@@ -74,9 +74,9 @@ eips_print_bottom_centered() {
 logmsg() {
     # Use the right tools for the platform
     if [ "${INIT_TYPE}" = "sysv" ]; then
-        msg "koreader: ${1}" "I"
+        msg "kfxdedrm: ${1}" "I"
     elif [ "${INIT_TYPE}" = "upstart" ]; then
-        f_log I koreader wrapper "" "${1}"
+        f_log I kfxdedrm wrapper "" "${1}"
     fi
 
     # And throw that on stdout too, for the DIY crowd ;)
@@ -94,15 +94,17 @@ check_exec() {
     fi
 }
 
-executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_c11" ) 
-[[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_old")
+executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrmhf_c11" ) 
 [[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrmhf_old")
-[[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrmhf_c11")
+[[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_old")
+[[ -z "$executable" ]] && executable=$(check_exec "/mnt/us/extensions/kfxdedrm/bin/kfxdedrm_c11")
 if [[ -z "$executable" ]]; then
   eips_print_bottom_centered "No working executable found" 1
   exit 1
 fi
 echo $executable
+eips_print_bottom_centered "$executable" 1
+
 "$executable" "$@" 2>&1 | while read -r line; do
     logmsg "$line"
     eips_print_bottom_centered "$line" 1
