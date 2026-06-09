@@ -22,8 +22,16 @@ KRFTool="Other_Tools/KRFKeyExtractor/KRFKeyExtractor.exe"
 KRFTool28="Other_Tools/KRFKeyExtractor/KFXKeyExtractor28.exe"
 KRFTool282="Other_Tools/KRFKeyExtractor/KFXKeyExtractor282.exe"
 KFXArchiverTool291="Other_Tools/KRFKeyExtractor/KFXArchiver291.exe"
+MSIXArchiverTool="Other_Tools/KRFKeyExtractor/MSIXKFXArchiver1_15230.exe"
 
 KRFFrida="Other_Tools/KRFKeyExtractor/kindleFridaInstr.py"
+KRFFridaDecr="Other_Tools/KRFKeyExtractor/kindleFridaDecrypt.py"
+KRFFrida86="Other_Tools/KRFKeyExtractor/kindledecr_x84_64"
+KRFFridaArm="Other_Tools/KRFKeyExtractor/kindledecr_arm64"
+KRFFridaAgent="Other_Tools/KRFKeyExtractor/compiled_agent.js"
+
+
+
 RELEASE_DIR = 'release'
 
 def patch_file(filepath):
@@ -97,6 +105,10 @@ def make_release(version):
     except:
         pass    
     try:
+        shutil.copy(MSIXArchiverTool, RELEASE_DIR)
+    except:
+        pass    
+    try:
         shutil.copy(KFXArchiverTool291, RELEASE_DIR)
     except:
         pass
@@ -104,6 +116,23 @@ def make_release(version):
         shutil.copy(KRFFrida, RELEASE_DIR)
     except:
         pass
+    try:
+        shutil.copy(KRFFridaDecr, RELEASE_DIR)
+    except:
+        pass        
+    try:
+        shutil.copy(KRFFrida86, RELEASE_DIR)
+    except:
+        pass
+    try:
+        shutil.copy(KRFFridaArm, RELEASE_DIR)
+    except:
+        pass
+    try:
+        shutil.copy(KRFFridaAgent, RELEASE_DIR)
+    except:
+        pass
+
     shutil.copy("ReadMe_Overview.txt", RELEASE_DIR)
 
     # Remove temp folder:
