@@ -1325,7 +1325,7 @@ struct ExecOffsets
 {
     int luceneaddr = 0;
     int make_storage = 0;
-    //int get_storage_value = 0; 
+    int get_storage_value = 0; 
     int deobfuscate_storage = 0;
     int get_plugin_man = 0;
     int load_all = 0;
@@ -1353,7 +1353,7 @@ ExecOffsets KindleReader1_0_15230()
     ret.make_storage = 0x10dbf3c0;
     ret.deobfuscate_storage= 0x1009b8d0;
 
-    //ret.get_storage_value = 0x04b8c80;
+    ret.get_storage_value = 0x1009c820;
 
     ret.spatch= 0x10065a60;
     ret.get_plugin_man = 0x11057890;
@@ -1555,27 +1555,6 @@ void PrintSimpleCallStack() {
 }
 
 #pragma intrinsic(_ReturnAddress)
-HANDLE CreateFileWFake(
-             LPCWSTR               lpFileName,
-               DWORD                 dwDesiredAccess,
-            DWORD                 dwShareMode,
-   LPSECURITY_ATTRIBUTES lpSecurityAttributes,
-              DWORD                 dwCreationDisposition,
-             DWORD                 dwFlagsAndAttributes,
-     HANDLE                hTemplateFile
-)
-{
-    std::wcout << "CreateFileW " << lpFileName << " access "<< dwDesiredAccess<< std::endl;
-
-
- 
-        // Captures the exact address in memory that called this function
-        void* callerAddress = _ReturnAddress();
-
-        std::cout << "[+] This function was called from address: 0x" << std::hex << callerAddress << "  " << (int)callerAddress-globoffs<<std::endl;
-        PrintSimpleCallStack();
-    return CreateFileW(lpFileName, dwDesiredAccess,dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-}
 
 
 // Helper function to write a byte buffer to a file
@@ -2245,6 +2224,7 @@ std::map<std::string,std::string> QHashToMD5Map(QHashData* hashData)
 
                 arr = (QBArray*)&dataNode->value;
                 std::string st((char*)((int)arr->d + arr->d->offset), arr->d->size);
+                std::cout << "Md5: " << md5 << " Value: " << st << std::endl;
                 ret[md5] = st;
                 discoveredCount++;
             }
@@ -3354,6 +3334,9 @@ int main(int argc, char* argv[])
     const wchar_t* amazon_app = L"Amazon\\Kindle\\application";
 
     HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localcappdata);
+    wchar_t old_cwd[MAX_PATH];
+    GetCurrentDirectoryW(MAX_PATH, old_cwd);
+    fs::path current_dir = fs::path(old_cwd);
 
     // Check if the function call was successful.
     if (!SUCCEEDED(hr))
@@ -3361,7 +3344,8 @@ int main(int argc, char* argv[])
         std::cerr << "Failed to get the LocalAppData folder path. HRESULT: " << hr << std::endl;
         return 1;
     }
-    fs::path data_folder = fs::path(localcappdata).root_name() / L"\\Data";
+   // SetCurrentDirectoryW(fs::path(localcappdata).root_name().wstring().);
+    fs::path data_folder = fs::path(old_cwd).root_name() / L"\\Data";
     fs::path storage = fs::path(localcappdata)  / L"Packages" / dat[0].family_name / fs::path(amazon_storage);
     fs::path reg_data = fs::path(localcappdata) / L"Packages" / dat[0].family_name / L"LocalState\\registration_data";
     fs::path keys_path = fs::path(localcappdata) / L"Packages" / dat[0].family_name / fs::path(key_suffix);
@@ -3394,14 +3378,12 @@ int main(int argc, char* argv[])
 
     OverwriteExportTable("ucrtbase.dll", "malloc", (ULONG_PTR)&mallocFake);
     OverwriteExportTable("ucrtbase.dll", "free", (ULONG_PTR)&freeFake);
-        OverwriteExportTable("VCRUNTIME140.DLL", "memcpy", (ULONG_PTR)&memcpyFake);
+     OverwriteExportTable("VCRUNTIME140.DLL", "memcpy", (ULONG_PTR)&memcpyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptOpenKey", (ULONG_PTR)&NCryptOpenKeyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptDecrypt", (ULONG_PTR)&NCryptDecryptFake);
     OverwriteExportTable("ncrypt.dll", "NCryptCreatePersistedKey", (ULONG_PTR)&NCryptCreatePersistedKeyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptEncrypt", (ULONG_PTR)&NCryptEncryptFake);
-    wchar_t old_cwd[MAX_PATH];
-    GetCurrentDirectoryW(MAX_PATH, old_cwd);
-    fs::path current_dir = fs::path(old_cwd);
+   
     std::wcout << "Copying folder to make it accessible: " << dat[0].install_folder << " --> " << data_folder.wstring() << std::endl;
     CopyFolderLegacy(dat[0].install_folder.c_str(), data_folder.wstring().c_str());
     fs::path load_path = data_folder / dat[0].full_name/L"KatxopoApp";
@@ -3419,6 +3401,22 @@ int main(int argc, char* argv[])
         std::wcout << "Could not load QTCore dll, error " << GetLastError()<<std::endl;
         return -3;
     }
+    //debug...
+    /*
+    correctLatin1 = (fakeQLatin1)GetProcAddress(hlq, "?toLatin1@QString@@QGBE?AVQByteArray@@XZ");
+    correctQbyte = (fakeQbyte)GetProcAddress(hlq, "??0QByteArray@@QAE@ABV0@@Z");
+    union {
+        void* (HookHandlerLatin1::* memberFn)(void*);
+
+        void* rawAddress;
+    } converterl;
+
+    // 2. Assign the member function pointer
+    converterl.memberFn = &HookHandlerLatin1::HookedFunction;
+    // 3. Extract the raw memory address
+    void* newHook = converterl.rawAddress;
+    OverwriteExportTable("Qt5Core.dll", "?toLatin1@QString@@QGBE?AVQByteArray@@XZ", (ULONG_PTR)newHook);*/
+    /// end debug
     std::vector<char> buffer(MAX_PATH + 1);
     GetModuleFileNameA(hlq, &buffer[0], buffer.size());
     std::cout << "Loaded QT lib from: " << std::string(&buffer[0]) << std::endl;
@@ -3459,13 +3457,27 @@ int main(int argc, char* argv[])
         std::cout << "Could not get storage" << std::endl;
         return -4;
     }
-
+    ///1009c820
     unobfhash uno = (unobfhash)(stoffset + curOffs.deobfuscate_storage);
     QHashData* hdata;
     uno(kinfo, &hdata);
-    //std::cout << "Storage hdata: "  << hdata->numBuckets << "  " << hdata->nodeSize << std::endl;
+    std::cout << "Storage hdata: "  << hdata->numBuckets << " nodesize: " << hdata->nodeSize <<" amount: "<< hdata->size << std::endl;
     std::map<std::string, std::string> strmap = QHashToMD5Map(hdata);
     std::string strtokens = strmap["495631f2946141093a7e333b85fa1a3d"];
+    /*toQString toQ = (toQString)GetProcAddress(hlq, "?fromStdString@QString@@SA?AV1@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+    fromQString fromQ = (fromQString)GetProcAddress(hlq, "?toStdString@QString@@QBE?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+    if (strtokens.empty())
+    {
+        std::string tokens = std::string("kindle.metrics.checksum");
+        getme getVal = (getme)(stoffset + curOffs.get_storage_value);
+        char qtokens[256];
+        void* tknz = toQ(qtokens, tokens); //std::string("kindle.account.tokens"));
+        char qstbufout[256];
+        void* nretout = toQ(qstbufout, std::string(""));
+        getVal(kinfo, nretout, tknz);
+        fromQ(nretout, strtokens);
+        
+    }*/
     std::cout << "Secret tokens: "<< strtokens << std::endl;
     if (strtokens.empty())
     {
