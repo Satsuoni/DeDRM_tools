@@ -250,6 +250,27 @@ std::string ReadFileToString(const std::string& filePath) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
+std::vector<char> ReadFileToVector(const std::string& filePath) 
+{
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+    if (!file.is_open()) {
+        std::cout<<"Could not open" << strerror(errno) << std::endl;
+        return std::vector<char>();
+    }
+    return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+std::vector<char> ReadFileToVector(const fs::path& filePath) 
+{
+
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+    if (!file.is_open()) {
+        std::cout << "Could not open" << strerror(errno) << std::endl;
+        return std::vector<char>();
+    }
+    return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+}
+
 //--------------------------------------- ION reader
 
 
@@ -2323,7 +2344,7 @@ std::wstring GetExternalInstallPath(const wchar_t* packageFullName)
 
         if (rc == ERROR_SUCCESS) {
             std::wcout << L"Install Path: " << path.data() << std::endl;
-            return std::wstring(path.begin(), path.end());
+            return std::wstring(path.data());
         }
     }
     std::cout << "Failed to find package path. Error code: " << rc << std::endl;
@@ -3286,6 +3307,33 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
     return;
 }
 
+void writeFileBasic(const fs::path& filename, const std::vector<char>& data) 
+{
+    std::ofstream file(filename, std::ios::out | std::ios::binary);
+    if (!file) 
+    {
+        std::cout <<" Could not open file " << filename << " For writing "  << strerror(errno) << std::endl;
+        return;
+    }
+  //  std::cout << hexStr((uint8_t*) & data[0], 16) << std::endl;
+    file.write(data.data(), data.size());
+}
+void degenerateCopyFile(const fs::path& f1, const fs::path& f2)
+{
+    if (f1 == f2) return;
+    //std::cout << "Trying to copy " << f1 << " to " << f2 << std::endl;
+    std::vector<char> vc = ReadFileToVector(f1);
+   // std::cout << "File size  " << vc.size()<< std::endl;
+    writeFileBasic(f2, vc);
+}
+void degenerateCopyNeededFiles(const fs::path& from, const std::vector<std::string>& files, const fs::path& to)
+{
+    fs::create_directories(to);
+    for (auto fl : files)
+    {
+        degenerateCopyFile(from/fs::path(fl),to/fs::path(fl));
+    }
+}
 int main(int argc, char* argv[])
 {
     std::map<std::string, ExecOffsets> supportMap;
@@ -3303,11 +3351,11 @@ int main(int argc, char* argv[])
         std::cout << "Please ensure that KindleReader UWP app is of the appropriate version (currently KindleReader1_0_15230)" << std::endl;
         std::cout << "In case Kindle version does not match, it would exit, probably" << std::endl;
         std::cout << "Note: to get proper values into k4i file, at least one KFX book that uses account secrets should be downloaded. If resulting k4i has no tokens set, try downloading some free books." << std::endl;
-        std::cout << "Note 2: this utility creates a temporary C:\\Data folder, where it copies all the files necessary for its function, including all of the KindleReader app, so about 800MB of space is needed. Folder can be deleted after use." << std::endl;
+        std::cout << "Note 2: this utility creates a temporary C:\\Data folder, where it copies all the files necessary for its function, including large portion of of the KindleReader app, so about 400MB of space is needed. Folder can be deleted after use." << std::endl;
         std::cout << "As usual, no guarantee, and provide its output if you ask for support." << std::endl;
        // return -1;
     }
-
+ 
 
     std::vector<basic_package_data> dat = FindPackagesViaRegistry(L"AmazonKindleReadingApp");
     if (dat.size() == 0)
@@ -3331,12 +3379,14 @@ int main(int argc, char* argv[])
     PWSTR programfiles = NULL;
     const wchar_t* key_suffix = L"LocalCache\\Local\\Microsoft\\Crypto\\PCPKSP\\";
     const wchar_t* amazon_storage = L"LocalState\\Classic\\Data\\storage\\";
-    const wchar_t* amazon_app = L"Amazon\\Kindle\\application";
+
 
     HRESULT hr = SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, NULL, &localcappdata);
     wchar_t old_cwd[MAX_PATH];
     GetCurrentDirectoryW(MAX_PATH, old_cwd);
     fs::path current_dir = fs::path(old_cwd);
+    std::vector<std::string> storage_files = { ".kinf2024", "main_shared.blob", "main_shared.salt","main_shared.blob.sha256"};
+    std::vector<std::string> dll_files = { "CFLite.dll", "concrt140_app.dll", "d3dcompiler_47.dll", "dsx120.dll", "hermes.dll", "icudt46.dll", "icudt65.dll", "icuin46.dll", "icuin65.dll", "icuio65.dll", "icuuc46.dll", "icuuc65.dll", "JavaScriptCore.dll", "libcrypto-1_1.dll", "libEGL.dll", "libfsdk_win32.dll", "libGLESv2.dll", "libjpeg.dll", "libpngKRF.dll", "libssl-1_1.dll", "LibWebCore.dll", "libxml2.dll", "Microsoft.ReactNative.dll", "Microsoft.Web.WebView2.Core.dll", "msvcp100.dll", "msvcp120.dll", "msvcp140.dll", "msvcp140_1_app.dll", "msvcp140_2_app.dll", "msvcp140_app.dll", "msvcr100.dll", "msvcr120.dll", "opengl32sw.dll", "Picker.dll", "pthreadVC2.dll", "Qt5Core.dll", "Qt5Gui.dll", "Qt5Multimedia.dll", "Qt5MultimediaWidgets.dll", "Qt5Network.dll", "Qt5OpenGL.dll", "Qt5Positioning.dll", "Qt5PrintSupport.dll", "Qt5Qml.dll", "Qt5Script.dll", "Qt5Sensors.dll", "Qt5Sql.dll", "Qt5Svg.dll", "Qt5WebChannel.dll", "Qt5WebSockets.dll", "Qt5Widgets.dll", "Qt5WinExtras.dll", "Qt5Xml.dll", "ReactNativeAsyncStorage.dll", "RNSVG.dll", "vcamp140_app.dll", "vccorlib120.dll", "vccorlib140.dll", "vccorlib140_app.dll", "vcomp140_app.dll", "vcruntime140.dll", "vcruntime140_app.dll", "WebCoreViewer.dll", "WebView2Loader.dll", "xrm120.dll", "zlib.dll", "zlib1.dll" };
 
     // Check if the function call was successful.
     if (!SUCCEEDED(hr))
@@ -3368,11 +3418,15 @@ int main(int argc, char* argv[])
     else
     {
         std::cout << "Making key(s) accessible" << std::endl;
+        //just in case
+       degenerateCopyFile(keys_path / L"d8c37e00045ea5de98d93811f777d227040edd50" / L"4111704e63913bc011faadfaf420c7573b17ac83.PCPKEY", key_target / L"d8c37e00045ea5de98d93811f777d227040edd50" / L"4111704e63913bc011faadfaf420c7573b17ac83.PCPKEY");
         CopyFolderContents(keys_path, key_target);
     }
     std::cout <<"Storage at: " << storage.string() << std::endl;
     std::cout << "Reg data at: " << reg_data.string() << std::endl;
-    CopyFolderContents(storage, data_folder/L"storage");
+    //CopyFolderContents(storage, data_folder/L"storage");
+    degenerateCopyNeededFiles(storage, storage_files, data_folder / L"storage");
+    //return 3;
     fs::path output_reg = data_folder / "decrypted_registration_data.dat";
     std::string dsn = decrypt_get_dsn(reg_data,output_reg);
 
@@ -3385,8 +3439,9 @@ int main(int argc, char* argv[])
     OverwriteExportTable("ncrypt.dll", "NCryptEncrypt", (ULONG_PTR)&NCryptEncryptFake);
    
     std::wcout << "Copying folder to make it accessible: " << dat[0].install_folder << " --> " << data_folder.wstring() << std::endl;
-    CopyFolderLegacy(dat[0].install_folder.c_str(), data_folder.wstring().c_str());
-    fs::path load_path = data_folder / dat[0].full_name/L"KatxopoApp";
+    degenerateCopyNeededFiles(fs::path(dat[0].install_folder)/ L"KatxopoApp", dll_files, data_folder / dat[0].full_name / L"KatxopoApp");
+  //  CopyFolderLegacy(dat[0].install_folder.c_str(), data_folder.wstring().c_str());
+    fs::path load_path = data_folder / dat[0].full_name / L"KatxopoApp";
     std::wcout << "Trying to move to " << load_path << std::endl;
     BOOL res = SetCurrentDirectoryW(load_path.wstring().c_str());
     if (!res)
@@ -3395,6 +3450,7 @@ int main(int argc, char* argv[])
         return -3;
     }
     SetDllDirectoryW(load_path.wstring().c_str());
+    std::wcout << "Success"  << std::endl;
     HINSTANCE hlq = LoadLibraryA("Qt5Core.dll");
     if (hlq == NULL)
     {
