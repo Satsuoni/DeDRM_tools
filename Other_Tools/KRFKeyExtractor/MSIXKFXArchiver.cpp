@@ -1395,6 +1395,29 @@ ExecOffsets KindleReader1_0_15230()
     return ret;
 }
 
+ExecOffsets KindleReader1_0_16034()
+{
+    ExecOffsets ret;
+    ret.make_storage = 0x10dbf3c0;
+    ret.spatch = 0x10065a60;
+    ret.luceneaddr = 0x11046b60;
+    ret.entry = 0;
+    ret.deobfuscate_storage = 0x1009b8d0;
+    ret.get_storage_value = 0x1009c820;
+    ret.get_plugin_man = 0x11057840;
+    ret.load_all = 0x11057940;
+    ret.decr_offset = 0x11b23660;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+    ret.get_factory = 0x11067a20;
+    ret.open_book = 0x11067af0;
+    ret.drm_provider = 0x11067e30;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.16034";
+    return ret;
+}
+
 struct IATRESULTS
 {
     enum class FAILUREREASON
@@ -3338,7 +3361,7 @@ int main(int argc, char* argv[])
 {
     std::map<std::string, ExecOffsets> supportMap;
     supportMap["a03451fe70e83bee2a0e8979667cc2a6"] = KindleReader1_0_15230();
-    
+    supportMap["8aa58a484f79ab467ae2a4d2999cc21f"] =  KindleReader1_0_16034();
 
 
     if (argc < 4)
@@ -3490,8 +3513,9 @@ int main(int argc, char* argv[])
         std::cout << "MD5 of dsx120.dll not in supported map, check your App version (md5:" << dllmd5<< std::endl;
         return -4;
     }
+    
     curOffs = fnd->second;
-    std::cout << "Detected Kindle vesrion " << curOffs.version << std::endl;
+    std::cout << "Detected Kindle version " << curOffs.version << std::endl;
     GetModuleFileNameA(hl, &buffer[0], buffer.size());
     std::cout << "Loaded dsx120 lib from: " << std::string(&buffer[0]) <<  std::endl;
     std::cout << "Going back to cwd " << SetCurrentDirectoryW(current_dir.wstring().c_str())<<std::endl;
