@@ -1362,6 +1362,7 @@ struct ExecOffsets
     int allemaric_shift=0;
     int spatch = 0;
     std::string version = "";
+    int vernum = -1;
 };
 
 ExecOffsets curOffs;
@@ -1392,6 +1393,7 @@ ExecOffsets KindleReader1_0_15230()
     ret.mbox_size = 119212;
     ret.mbox_iv_offset = 0x1d180;
     ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.15230";
+    ret.vernum = 0;
     return ret;
 }
 
@@ -1415,6 +1417,30 @@ ExecOffsets KindleReader1_0_16034()
     ret.drm_provider = 0x11067e30;
 
     ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.16034";
+    ret.vernum = 1;
+    return ret;
+}
+ExecOffsets KindleReader1_0_16118()
+{
+    ExecOffsets ret;
+    ret.entry = 0;
+    ret.deobfuscate_storage = 0x1009b8d0;
+    ret.get_storage_value = 0x1009c820;
+    ret.make_storage = 0x10dbf3c0;
+    ret.spatch = 0x10065a60;
+    ret.luceneaddr = 0x11046b60;
+    ret.get_plugin_man = 0x11057840;
+    ret.load_all = 0x11057940;
+    ret.decr_offset = 0x11b23660;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+    ret.get_factory = 0x11067a20;
+    ret.open_book = 0x11067af0;
+    ret.drm_provider = 0x11067e30;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.16118";
+    ret.vernum = 2;
     return ret;
 }
 
@@ -3357,17 +3383,40 @@ void degenerateCopyNeededFiles(const fs::path& from, const std::vector<std::stri
         degenerateCopyFile(from/fs::path(fl),to/fs::path(fl));
     }
 }
+std::vector<fs::path> find_valid_subfolders(const fs::path& dir_path) 
+{
+    std::vector<fs::path> subfolders;
+
+    // Check if the path exists and is actually a directory
+    if (!fs::exists(dir_path) || !fs::is_directory(dir_path)) {
+        return subfolders;
+    }
+
+    // directory_iterator loops through the top level only (non-recursive)
+    for (const auto& entry : fs::directory_iterator(dir_path)) {
+        if (entry.is_directory()) {
+            if (fs::exists(entry.path()/L"KatxopoApp"/L"dsx120.dll"))
+            {
+                subfolders.push_back(entry.path());
+            }
+           
+        }
+    }
+
+    return subfolders;
+}
 int main(int argc, char* argv[])
 {
     std::map<std::string, ExecOffsets> supportMap;
     supportMap["a03451fe70e83bee2a0e8979667cc2a6"] = KindleReader1_0_15230();
     supportMap["8aa58a484f79ab467ae2a4d2999cc21f"] =  KindleReader1_0_16034();
-
+    supportMap["db8035b8f8673ec4c3247161b5f57ded"] = KindleReader1_0_16118();
 
     if (argc < 4)
     {
-        std::cout << "Usage: executable [kindle documents path (with _EBOK folders)] [output folder] [output k4i file]  -> all parameters optional" << std::endl;
+        std::cout << "Usage: executable [kindle documents path (with _EBOK folders)] [output folder] [output k4i file] [folder with dlls(KatxopoApp)] -> all parameters optional" << std::endl;
         std::cout << "Defaults are, in order, contents folder of the app in %APPDATA%/Local/Packages..etc, archived_kfx for folder and oldbooks.k4i" << std::endl;
+        std::cout << "Defaults for folder with dll does not exist/ is installed dir" << std::endl;
         std::cout << "One can use \"default\" to fall back to default value, so don't name your file default, I guess." << std::endl;
         std::cout << "Output folder will be created. Output folder will contain kfx-zips after running, hopefully. Those can be imported with KFX Input plugin into calibre" << std::endl;
         std::cout << "This program searches for Kindle executable in registry, run it from wherever, and it should work. Probably." << std::endl;
@@ -3378,10 +3427,22 @@ int main(int argc, char* argv[])
         std::cout << "As usual, no guarantee, and provide its output if you ask for support." << std::endl;
        // return -1;
     }
- 
+    bool is_external_folder = false;
+    fs::path external_load;
+    if (argc >= 5)
+    {
+        external_load = fs::path(argv[4]);
+
+        if (!fs::is_regular_file(external_load / L"dsx120.dll"))
+        {
+            std::cout << "External dll folder given, but it does not have core DLL, aborting: " << (external_load / L"dsx120.dll").string() << " does not exist" <<std::endl;
+            return -1;
+        }
+        is_external_folder = true;
+    }
 
     std::vector<basic_package_data> dat = FindPackagesViaRegistry(L"AmazonKindleReadingApp");
-    if (dat.size() == 0)
+    if (dat.size() == 0&&!is_external_folder)
     {
         std::cout << "No AmazonKindleReadingApp installation found, aborting..." << std::endl;
         return -1;
@@ -3396,6 +3457,15 @@ int main(int argc, char* argv[])
     {
         std::cout << "Several AmazonKindleReadingApp installations found! Aborting." << std::endl;
         return -1;
+    }
+    if (dat.size() == 0 && is_external_folder)
+    {
+        basic_package_data fake_data;
+        fake_data.family_name = L"AMZNKindle.AmazonKindleReadingApp_m1sc522ngdk36";
+        fake_data.install_folder = external_load.parent_path();
+        fake_data.full_name = L"AMZNKindle.AmazonKindleReadingApp_m1sc522ngdk36";
+        dat.push_back(fake_data);
+         
     }
 
     PWSTR localcappdata = NULL;
@@ -3455,16 +3525,28 @@ int main(int argc, char* argv[])
 
     OverwriteExportTable("ucrtbase.dll", "malloc", (ULONG_PTR)&mallocFake);
     OverwriteExportTable("ucrtbase.dll", "free", (ULONG_PTR)&freeFake);
-     OverwriteExportTable("VCRUNTIME140.DLL", "memcpy", (ULONG_PTR)&memcpyFake);
+    OverwriteExportTable("VCRUNTIME140.DLL", "memcpy", (ULONG_PTR)&memcpyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptOpenKey", (ULONG_PTR)&NCryptOpenKeyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptDecrypt", (ULONG_PTR)&NCryptDecryptFake);
     OverwriteExportTable("ncrypt.dll", "NCryptCreatePersistedKey", (ULONG_PTR)&NCryptCreatePersistedKeyFake);
     OverwriteExportTable("ncrypt.dll", "NCryptEncrypt", (ULONG_PTR)&NCryptEncryptFake);
    
     std::wcout << "Copying folder to make it accessible: " << dat[0].install_folder << " --> " << data_folder.wstring() << std::endl;
+    if(!is_external_folder)
+    {
     degenerateCopyNeededFiles(fs::path(dat[0].install_folder)/ L"KatxopoApp", dll_files, data_folder / dat[0].full_name / L"KatxopoApp");
+    }
+    else
+    {
+        std::cout << "Using external folder, not copying" << std::endl;
+    }
   //  CopyFolderLegacy(dat[0].install_folder.c_str(), data_folder.wstring().c_str());
     fs::path load_path = data_folder / dat[0].full_name / L"KatxopoApp";
+    if (is_external_folder)
+    {
+        load_path = external_load;
+     
+    }
     std::wcout << "Trying to move to " << load_path << std::endl;
     BOOL res = SetCurrentDirectoryW(load_path.wstring().c_str());
     if (!res)
@@ -3474,12 +3556,7 @@ int main(int argc, char* argv[])
     }
     SetDllDirectoryW(load_path.wstring().c_str());
     std::wcout << "Success"  << std::endl;
-    HINSTANCE hlq = LoadLibraryA("Qt5Core.dll");
-    if (hlq == NULL)
-    {
-        std::wcout << "Could not load QTCore dll, error " << GetLastError()<<std::endl;
-        return -3;
-    }
+   
     //debug...
     /*
     correctLatin1 = (fakeQLatin1)GetProcAddress(hlq, "?toLatin1@QString@@QGBE?AVQByteArray@@XZ");
@@ -3496,6 +3573,56 @@ int main(int argc, char* argv[])
     void* newHook = converterl.rawAddress;
     OverwriteExportTable("Qt5Core.dll", "?toLatin1@QString@@QGBE?AVQByteArray@@XZ", (ULONG_PTR)newHook);*/
     /// end debug
+
+    std::string dllmd5 = CalculateMD5(L"dsx120.dll");
+    auto fnd = supportMap.find(dllmd5);
+    if (fnd == supportMap.end())
+    {
+        std::cout << "MD5 of dsx120.dll not in supported map, check your App version (md5:" << dllmd5 << std::endl;
+        std::cout << "WARNING:: Attempting to find an older (newest supported) version in " << data_folder << " ::WARNING" << std::endl;
+        std::vector<fs::path> vpaths = find_valid_subfolders(data_folder);
+        fs::path vp;
+        int best = -1;
+        for (auto pth : vpaths)
+        {
+            std::string candidate  = CalculateMD5((pth/ L"KatxopoApp" / L"dsx120.dll").wstring());
+            auto fndc = supportMap.find(candidate);
+            if (fndc != supportMap.end())
+            {
+                if (fndc->second.vernum > best)
+                {
+                    fnd = fndc;
+                    best = fndc->second.vernum;
+                    vp = pth / L"KatxopoApp";
+                }
+            }
+        }
+        if (best < 0)
+        {
+            std::cout << "Did not find replacement version " << std::endl;
+            return -4;
+        }
+        BOOL res = SetCurrentDirectoryW(vp.wstring().c_str());
+        if (!res)
+        {
+            std::wcout << "Could not move to found dir " <<vp<< std::endl;
+            return -3;
+        }
+        SetDllDirectoryW(vp.wstring().c_str());
+        std::wcout << "Moved to " << vp << std::endl;
+        std::cout << "WARNING:: Using older version  " << fnd->second.version << " , some books may not decrypt ::WARNING" <<std::endl;
+    }
+    else
+    {
+        std::cout << "Detected installed Kindle version " << curOffs.version << std::endl;
+    }
+    curOffs = fnd->second;
+    HINSTANCE hlq = LoadLibraryA("Qt5Core.dll");
+    if (hlq == NULL)
+    {
+        std::wcout << "Could not load QTCore dll, error " << GetLastError() << std::endl;
+        return -3;
+    }
     std::vector<char> buffer(MAX_PATH + 1);
     GetModuleFileNameA(hlq, &buffer[0], buffer.size());
     std::cout << "Loaded QT lib from: " << std::string(&buffer[0]) << std::endl;
@@ -3506,16 +3633,10 @@ int main(int argc, char* argv[])
         std::cerr << "LoadLibrary of dsx120 failed with error code: " << errorCode << std::endl;
         return -3;
     }
-    std::string dllmd5 = CalculateMD5(L"dsx120.dll");
-    auto fnd = supportMap.find(dllmd5);
-    if (fnd == supportMap.end())
-    {
-        std::cout << "MD5 of dsx120.dll not in supported map, check your App version (md5:" << dllmd5<< std::endl;
-        return -4;
-    }
     
-    curOffs = fnd->second;
-    std::cout << "Detected Kindle version " << curOffs.version << std::endl;
+    
+   
+   
     GetModuleFileNameA(hl, &buffer[0], buffer.size());
     std::cout << "Loaded dsx120 lib from: " << std::string(&buffer[0]) <<  std::endl;
     std::cout << "Going back to cwd " << SetCurrentDirectoryW(current_dir.wstring().c_str())<<std::endl;

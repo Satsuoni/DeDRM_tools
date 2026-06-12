@@ -22,7 +22,7 @@ KRFTool="Other_Tools/KRFKeyExtractor/KRFKeyExtractor.exe"
 KRFTool28="Other_Tools/KRFKeyExtractor/KFXKeyExtractor28.exe"
 KRFTool282="Other_Tools/KRFKeyExtractor/KFXKeyExtractor282.exe"
 KFXArchiverTool291="Other_Tools/KRFKeyExtractor/KFXArchiver291.exe"
-MSIXArchiverTool="Other_Tools/KRFKeyExtractor/MSIXKFXArchiver1_16034.exe"
+MSIXArchiverTool="Other_Tools/KRFKeyExtractor/MSIXKFXArchiver1_16118.exe"
 
 KRFFrida="Other_Tools/KRFKeyExtractor/kindleFridaInstr.py"
 KRFFridaDecr="Other_Tools/KRFKeyExtractor/kindleFridaDecrypt.py"
