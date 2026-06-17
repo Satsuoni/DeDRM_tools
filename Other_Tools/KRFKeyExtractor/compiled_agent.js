@@ -1,5 +1,5 @@
 📦
-443428 /agent.js
+443532 /agent.js
 ✄
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
@@ -13535,9 +13535,9 @@ frida_java_bridge_default.perform(function() {
   krf.initKRF(liblist);
   send({ msg: "ready", dsn, secrets: jssecrets });
 });
+var allocations = {};
 function openBook(bookMessage) {
   frida_java_bridge_default.perform(function() {
-    const allocations = {};
     var bkfl = cfile.$new("/storage/emulated/0/Android/data/com.amazon.kindle/files/" + bookMessage.bookFile);
     var emptyList = ArrayList.$new();
     var voucherList = ArrayList.$new();
@@ -13579,9 +13579,10 @@ function openBook(bookMessage) {
       }
     );
     console.log("Opening book");
-    console.log("voucherList");
     var book = krf.openBook(bkfl, secrs, dsn, voucherList, emptyList);
     console.log(book.class);
+    console.log("Sending remnants");
+    console.log(Object.keys(allocations).length);
     Object.keys(allocations).forEach((key) => {
       if (allocations[key] == 16) {
         let p = new NativePointer(key);
@@ -13589,6 +13590,8 @@ function openBook(bookMessage) {
         send("mem", arr);
       }
     });
+    freeListener.detach();
+    allocListener.detach();
     send("done");
   });
   recv("book", openBook);

@@ -17,7 +17,7 @@ import json
 # install and run frida server on the device/emulator
 # install frida for python that matches the version on the device 
 # install Android platform tools and connect to device/emulator
-# copy this python scrtipt and compiled_agent.js into the same folder
+# copy this python script and compiled_agent.js into the same folder
 # run Kindle on Android, and download the books you want to convert from your library 
 # adb pull /sdcard/Android/data/com.amazon.kindle/
 # make output folder, like output
@@ -754,14 +754,14 @@ class DrmIon(object):
         self.onvoucherrequired = onvoucherrequired
         self.skeylist = skeylist
         self.key=None
+        self.plain=False
     def parse(self, outpages):
         self.ion.reset()
-
+        self.plain=True
         _assert(self.ion.hasnext(), "DRMION envelope is empty")
         _assert(self.ion.next() == TID_SYMBOL and self.ion.gettypename() == "doctype", "Expected doctype symbol")
         _assert(self.ion.next() == TID_LIST and self.ion.gettypename() in ["com.amazon.drm.Envelope@1.0", "com.amazon.drm.Envelope@2.0"],
                 "Unknown type encountered in DRMION envelope, expected Envelope, got %s" % self.ion.gettypename())
-
         while True:
             if self.ion.gettypename() == "enddoc":
                 break
@@ -793,6 +793,7 @@ class DrmIon(object):
                     decrypt = True
                     ct = None
                     civ = None
+                    self.plain=False
                     self.ion.stepin()
                     while self.ion.hasnext():
                         self.ion.next()
@@ -894,7 +895,9 @@ class DrmIon(object):
 
 def processBook(bookfilelist, keylist,bookid):
   while len(keylist)>1:
-    print("reducing key  ")
+    print("reducing key current length {}".format(len(keylist)))
+    oldklen=len(keylist)
+    allplain=True
     for filename,outfilename in bookfilelist:
       with open(filename,"rb") as fh:
         data = fh.read(8)
@@ -906,9 +909,18 @@ def processBook(bookfilelist, keylist,bookid):
         try:
           ion.parse(outfile)
         except Exception as e:
+          print("Exception")
           print(e)
         keylist=ion.skeylist
+        if not ion.plain: allplain=False
         if len(keylist)<=1: break
+    if allplain: 
+      print("All ions without encryption")
+      keylist=[keylist[0]]
+    if oldklen==len(keylist):
+      print("Could not reduce?")
+      print(keylist)
+      exit(2)
   if len(keylist)==0:
     print("no keys...")
     return
