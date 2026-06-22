@@ -3386,7 +3386,7 @@ int main(int argc, char *argv[])
     for (auto &inpath : infolders)
     {
     scan_folder_for_book_candidates(inpath, infiles);
-    mobi_scan(inpath, mobifiles);
+    mobi_scan(inpath, infiles);
     }
     updatemenufile(infiles);
     return 0;
