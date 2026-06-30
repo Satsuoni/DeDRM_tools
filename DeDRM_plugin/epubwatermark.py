@@ -288,17 +288,24 @@ def removeOPFwatermarks(object, path_to_ebook):
 
 
 
-def removeCDPwatermark(object, path_to_ebook):
-    # "META-INF/cdp.info" is a watermark file used by some Tolino vendors. 
-    # We don't want that in our eBooks, so lets remove that file.
+# Removes watermark files based on filenames and file paths
+def removeWatermarkFiles(object, path_to_ebook):
     try: 
         infile = ZipFile(open(path_to_ebook, 'rb'))
         namelist = infile.namelist()
-        if 'META-INF/cdp.info' not in namelist:
-            return path_to_ebook
 
         namelist.remove("mimetype")
-        namelist.remove("META-INF/cdp.info")
+
+        had_tolino_cdpinfo = False
+
+        # "META-INF/cdp.info" is a watermark file used by some Tolino vendors.
+        # We don't want that in our eBooks, so lets remove that file.
+        if 'META-INF/cdp.info' in namelist:
+            namelist.remove("META-INF/cdp.info")
+            had_tolino_cdpinfo = True
+
+        if not(had_tolino_cdpinfo):
+            return path_to_ebook
 
         output = object.temporary_file(".epub").name
 
@@ -336,7 +343,8 @@ def removeCDPwatermark(object, path_to_ebook):
 
                 outf.writestr(zi, data)
         
-        print("Watermark: Successfully removed cdp.info watermark")
+        if had_tolino_cdpinfo:
+            print("Watermark: Successfully removed cdp.info watermark")
         return output
 
     except: 

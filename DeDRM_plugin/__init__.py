@@ -238,8 +238,8 @@ class DeDRM(FileTypePlugin):
             if dedrmprefs["remove_watermarks"] is True:
                 import epubwatermark as watermark
 
-                # Remove Tolino's CDP watermark file
-                path_to_ebook = watermark.removeCDPwatermark(self, path_to_ebook) or path_to_ebook
+                # Remove watermark (Tolino's CDP) files
+                path_to_ebook = watermark.removeWatermarkFiles(self, path_to_ebook) or path_to_ebook
 
                 # Remove watermarks (Amazon or LemonInk) from the OPF file
                 path_to_ebook = watermark.removeOPFwatermarks(self, path_to_ebook) or path_to_ebook
