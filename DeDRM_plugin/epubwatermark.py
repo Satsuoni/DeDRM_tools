@@ -20,6 +20,7 @@ from zeroedzipinfo import ZeroedZipInfo
 from contextlib import closing
 from lxml import etree
 import re
+from os.path import basename
 
 # Runs a RegEx over all HTML/XHTML files to remove watermakrs.
 def removeHTMLwatermarks(object, path_to_ebook):
@@ -204,6 +205,7 @@ def removeOPFwatermarks(object, path_to_ebook):
 
             had_amazon = False
             had_elibri = False
+            had_palmknihy = False
 
             # Remove Amazon hex watermarks
             # Match optional newline at the beginning, then spaces, then a "meta" tag with name = "Watermark" or "Watermark_(hex)" and a "content" element.
@@ -224,6 +226,17 @@ def removeOPFwatermarks(object, path_to_ebook):
                 container_str_new = re.sub(r'\=\"id[0-9]+_([0-9]+)\"', r'="id_\1"', container_str_new)
             if pre_remove != container_str_new:
                 had_elibri = True
+
+            # Remove Palmknihy watermark and watermark file references (the watermark file gets deleted by a different chunk of code)
+            # They add a "social-drm.xhtml" file with a LNDB-X-Y watermark (where Y is the user identifier) and the person's registered name, add it to the list of pages and sometimes also embed the LNDB-... watermark directly into the metadata
+            pre_remove = container_str_new
+            container_str_new = re.sub(r'((\r\n|\r|\n)\s*)?<item\s+id="social-drm"\s+href="(.*/)?social-drm\.xhtml"\s+media-type="application/xhtml\+xml"\s*/>', '', container_str_new)
+            container_str_new = re.sub(r'((\r\n|\r|\n)\s*)?<itemref\s+idref="social-drm"\s*/>', '', container_str_new)
+            if pre_remove != container_str_new:
+                # Only strip this watermark if there were references to the separate social-drm.xhtml watermark file
+                container_str_new = re.sub(r'((\r\n|\r|\n)\s*)?<dc:source\s*>\s*LNDB-[0-9-]+\s*</dc:source\s*>', '', container_str_new)
+            if pre_remove != container_str_new:
+                had_palmknihy = True
 
         except:
             traceback.print_exc()
@@ -283,6 +296,8 @@ def removeOPFwatermarks(object, path_to_ebook):
             print("Watermark: Successfully stripped eLibri watermark from OPF file.")
         if had_amazon:
             print("Watermark: Successfully stripped Amazon watermark from OPF file.")
+        if had_palmknihy:
+            print("Watermark: Successfully stripped Palmknihy watermark from OPF file.")
 
         return output
 
@@ -297,6 +312,7 @@ def removeWatermarkFiles(object, path_to_ebook):
         namelist.remove("mimetype")
 
         had_tolino_cdpinfo = False
+        had_palmknihy_socialdrm = False
 
         # "META-INF/cdp.info" is a watermark file used by some Tolino vendors.
         # We don't want that in our eBooks, so lets remove that file.
@@ -304,7 +320,13 @@ def removeWatermarkFiles(object, path_to_ebook):
             namelist.remove("META-INF/cdp.info")
             had_tolino_cdpinfo = True
 
-        if not(had_tolino_cdpinfo):
+        # "social-drm.xhtml" is a watermark file used by Palmknihy that we don't want in our eBooks
+        for filepath in namelist:
+            if basename(filepath) == 'social-drm.xhtml':
+                namelist.remove(filepath)
+                had_palmknihy_socialdrm = True
+
+        if not(had_tolino_cdpinfo or had_palmknihy_socialdrm):
             return path_to_ebook
 
         output = object.temporary_file(".epub").name
@@ -345,6 +367,8 @@ def removeWatermarkFiles(object, path_to_ebook):
         
         if had_tolino_cdpinfo:
             print("Watermark: Successfully removed cdp.info watermark")
+        if had_palmknihy_socialdrm:
+            print("Watermark: Successfully removed social-drm.xhtml watermark")
         return output
 
     except: 
