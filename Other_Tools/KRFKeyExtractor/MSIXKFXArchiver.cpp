@@ -4084,10 +4084,12 @@ int processFile(const char* outputFile, const std::string& fname, const std::str
     }
     else
     {
-        mz_bool status = mz_zip_add_mem_to_archive_file_in_place(outputFile, archivedName.c_str(), buf, bl, NULL, 0, MZ_BEST_COMPRESSION);
+      //  mz_zip_add_mem_to_archive_file_in_place_v2(pZip_filename, pArchive_name, pBuf, buf_size, pComment, comment_size, level_and_flags, NULL);
+        mz_zip_error err;
+        mz_bool status = mz_zip_add_mem_to_archive_file_in_place_v2(outputFile, archivedName.c_str(), buf, bl, NULL, 0, MZ_BEST_COMPRESSION,&err);
         if (!status)
         {
-            printf("mz_zip_add_mem_to_archive_file_in_place of non-DRM file  failed!\n");
+            printf("mz_zip_add_mem_to_archive_file_in_place of non-DRM file failed for %s! Error: %s \n", archivedName.c_str(), mz_zip_get_error_string(err));
             free(buf);
             return EXIT_FAILURE;
         }
@@ -4105,7 +4107,6 @@ int processFile(const char* outputFile, const std::string& fname, const std::str
 
 
 
-// Emulates timing with std::chrono, uses raw pointer (or std::unique_ptr) for dynamic book types
 BookInterface* GetDecryptedBook(
     const std::string& infile,
     const std::vector<std::string>& kDatabases,
@@ -4301,6 +4302,15 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                             {
                                 try
                                 {
+                                    fs::path out_path = fs::path(outdir) / fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension());
+                                    if (fs::exists(out_path))
+                                    {
+                                        std::cout << "File " << fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension()) << " already exists in the output folder" << std::endl;
+                                        std::cout << "Skipping" << std::endl;
+                                        mobiProc = true;
+                                    }
+                                    else 
+                                    {                                    
                                     auto pdd = mb.getPIDMetaInfo();
                                     invalid = false;
                                     std::vector<std::string> sec;
@@ -4310,11 +4320,13 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                                     }
                                     std::vector<std::string> pidz = getK4Pids(pdd.first, pdd.second, serial, sec);
                                     mb.processBook(pidz);
-                                    fs::path out_path = fs::path(outdir) / fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension());
+                                   
                                     std::cout << "Looks like it processed... Saving to " << out_path << std::endl;
 
                                     mb.writeFile(out_path);
                                     mobiProc = true;
+                                    }
+
                                 }
                                 catch (DrmException e)
                                 {
@@ -4374,6 +4386,15 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                                 {
                                     try
                                     {
+                                        fs::path out_path = fs::path(outdir) / fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension());
+                                        if (fs::exists(out_path))
+                                        {
+                                            std::cout << "File " << fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension()) << " already exists in the output folder" << std::endl;
+                                            std::cout << "Skipping" << std::endl;
+                                            mobiProc = true;
+                                        }
+                                        else 
+                                        {
                                         invalid = false;
                                         auto pdd = mb.getPIDMetaInfo();
                                         std::vector<std::string> sec;
@@ -4383,11 +4404,12 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                                         }
                                         std::vector<std::string> pidz = getK4Pids(pdd.first, pdd.second, serial, sec);
                                         mb.processBook(pidz);
-                                        fs::path out_path = fs::path(outdir) / fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension());
+                                        
                                         std::cout << "Looks like it processed... Saving to " << out_path << std::endl;
 
                                         mb.writeFile(out_path);
                                         mobiProc = true;
+                                        }
                                         
                                     }
                                     catch (DrmException e)
@@ -4417,48 +4439,58 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                 }
                 if (opened)
                 {
-                    std::string output_name = outdir + std::string("\\") + remove_extension(base_name(params.shortBookFile)) + ".kfx-zip";
-                    BasicDecryptor* decr = nullptr;
-                    if (!mbox_saved && params.vouchers.size() == 0)
+                    //std::string output_name = outdir + std::string("\\") + remove_extension(base_name(params.shortBookFile)) + ".kfx-zip";
+                    fs::path oname = fs::path(remove_extension(base_name(params.shortBookFile)) + ".kfx-zip");
+                    fs::path output_path = fs::path(outdir) / oname ;
+                    if (fs::exists(output_path))
                     {
-                        std::cout << "Found keyless book, packing it for completion" << std::endl;
-                        std::vector < uint8_t> key(16);//dummy key
-
-                        decr = (BasicDecryptor*)new AesDecryptor(key);
+                        std::cout << "File " << oname << " already exists in the output folder" << std::endl;
+                        std::cout << "Skipping" << std::endl;
                     }
                     else 
                     {
-                    if (acc.keys_128.size() == 0)
-                    {
-                        std::cout << "Book opened, but no book keys detected... Trying to use mbox" << std::endl;
-                        if (!mbox_saved)
+                        BasicDecryptor* decr = nullptr;
+                        if (!mbox_saved && params.vouchers.size() == 0)
                         {
-                            std::cout << "Mbox not saved either... Looks like opening actually failed? " << std::endl;
-                            opened = false;
-                        }
-                        decr = new MboxDecryptor();
-                    }
-                    else
-                    {
-                        std::cout << "Found key " << *acc.keys_128.begin() << ", trying to use clear AES" << std::endl;
-                        std::vector < uint8_t> key = HexToBytes(*acc.keys_128.begin());
+                            std::cout << "Found keyless book, packing it for completion" << std::endl;
+                            std::vector < uint8_t> key(16);//dummy key
 
-                        decr = (BasicDecryptor*)new AesDecryptor(key);
-                    }
-                    }
-                    if (opened)
-                    {
-                        std::cout << "Removal result " << std::remove(output_name.c_str()) << std::endl; //clear if exists
-                        processFile(output_name.c_str(), params.bookFile, params.shortBookFile, decr);
-                        auto it1 = params.resources.begin();
-                        auto it2 = params.shortResources.begin();
-                        while (it1 != params.resources.end() && it2 != params.shortResources.end())
-                        {
-                            processFile(output_name.c_str(), *it1, *it2, decr);
-                            ++it1;
-                            ++it2;
+                            decr = (BasicDecryptor*)new AesDecryptor(key);
                         }
-                        delete decr;
+                        else 
+                        {
+                        if (acc.keys_128.size() == 0)
+                        {
+                            std::cout << "Book opened, but no book keys detected... Trying to use mbox" << std::endl;
+                            if (!mbox_saved)
+                            {
+                                std::cout << "Mbox not saved either... Looks like opening actually failed? " << std::endl;
+                                opened = false;
+                            }
+                            decr = new MboxDecryptor();
+                        }
+                        else
+                        {
+                            std::cout << "Found key " << *acc.keys_128.begin() << ", trying to use clear AES" << std::endl;
+                            std::vector < uint8_t> key = HexToBytes(*acc.keys_128.begin());
+
+                            decr = (BasicDecryptor*)new AesDecryptor(key);
+                        }
+                        }
+                        if (opened)
+                        {
+                            std::cout << "Removal result " << std::remove(output_path.string().c_str()) << std::endl; //clear if exists
+                            processFile(output_path.string().c_str(), params.bookFile, params.shortBookFile, decr);
+                            auto it1 = params.resources.begin();
+                            auto it2 = params.shortResources.begin();
+                            while (it1 != params.resources.end() && it2 != params.shortResources.end())
+                            {
+                                processFile(output_path.string().c_str(), *it1, *it2, decr);
+                                ++it1;
+                                ++it2;
+                            }
+                            delete decr;
+                        }
                     }
 
                 }
