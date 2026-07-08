@@ -2382,6 +2382,34 @@ ExecOffsets KindleReader1_0_18320()
     return ret;
 }
 
+//a5af62fd27d6cf599575ba0c1c112985
+ExecOffsets KindleReader1_0_18632()
+{
+    ExecOffsets ret;
+    ret.get_factory = 0x11067fd0;
+    ret.open_book = 0x110680a0;
+    ret.luceneaddr = 0x11047130;
+    ret.make_storage = 0x10dbf770;
+    ret.spatch = 0x10065a60;
+    ret.get_storage_value = 0x1009c870;
+    ret.deobfuscate_storage = 0x1009b920;
+    ret.get_plugin_man = 0x11057e10;
+    ret.load_all = 0x11057f10;
+    ret.drm_provider = 0x110683e0;
+    
+
+    ret.decr_offset = 0x11b23bf0;
+    ret.mbox_size = 119212;//0x1d1ac
+    ret.mbox_iv_offset = 0x1d180;
+    ret.allemaric_shift = 12;
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.0.18632";
+    ret.vernum = 4;
+   
+    ret.entry = 0;
+    return ret;
+}
+
 struct IATRESULTS
 {
     enum class FAILUREREASON
@@ -4362,7 +4390,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                     }
                     if (opened || invalid)break;
                 }
-                if (!opened && !invalid)
+                if (!opened && !invalid && !mobiProc)
                 {
                     for (auto& serial : *serial_candidates)
                     {
@@ -4454,7 +4482,7 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                 {
                     std::cout << "Seemingly processed as MOBI " << std::endl;
                 }
-                if (!opened && !invalid)
+                if (!opened && !invalid && !mobiProc)
                 {
                     std::cout << "Could not open " << params.bookFile << std::endl;
 
@@ -4643,7 +4671,9 @@ int main(int argc, char* argv[])
     supportMap["8aa58a484f79ab467ae2a4d2999cc21f"] = KindleReader1_0_16034();
     supportMap["db8035b8f8673ec4c3247161b5f57ded"] = KindleReader1_0_16118();
     supportMap["2b13ee9cf40ebf26f3d14f4987b9b329"] = KindleReader1_0_18320();
-    
+    supportMap["a5af62fd27d6cf599575ba0c1c112985"] = KindleReader1_0_18632();
+
+
     if (argc < 4)
     {
         std::cout << "Usage: executable [kindle documents path (with _EBOK folders)] [output folder] [output k4i file] [folder with dlls(KatxopoApp)] [k4i file, k4i file...]-> all parameters optional" << std::endl;
@@ -4862,7 +4892,7 @@ int main(int argc, char* argv[])
     }
     else
     {
-        std::cout << "Detected installed Kindle version " << curOffs.version << std::endl;
+        std::cout << "Detected installed Kindle version " << fnd->second.version << std::endl;
     }
     curOffs = fnd->second;
     HINSTANCE hlq = LoadLibraryA("Qt5Core.dll");
