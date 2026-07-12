@@ -583,12 +583,90 @@ std::vector<std::string> getK4Pids(const std::vector<char>& rec209, const std::v
 }
 
 
-std::string ReadFileToString(const std::string& filePath) {
+std::wstring utf8_to_wide(const std::string& value)
+{
+    if (value.empty())
+    {
+        return L"";
+    }
+
+    const int size_needed = MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        value.c_str(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0
+    );
+
+    if (size_needed <= 0)
+    {
+        return L"";
+    }
+
+    std::wstring result(size_needed, L'\0');
+
+    MultiByteToWideChar(
+        CP_UTF8,
+        0,
+        value.c_str(),
+        static_cast<int>(value.size()),
+        &result[0],
+        size_needed
+    );
+
+    return result;
+}
+
+std::string wide_to_utf8(const std::wstring& value)
+{
+    if (value.empty())
+    {
+        return "";
+    }
+
+    const int size_needed = WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        value.c_str(),
+        static_cast<int>(value.size()),
+        nullptr,
+        0,
+        nullptr,
+        nullptr
+    );
+
+    if (size_needed <= 0)
+    {
+        return "";
+    }
+
+    std::string result(size_needed, '\0');
+
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        value.c_str(),
+        static_cast<int>(value.size()),
+        &result[0],
+        size_needed,
+        nullptr,
+        nullptr
+    );
+
+    return result;
+}
+
+std::string ReadFileToString(const fs::path& filePath) {
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file.is_open()) {
         return "";
     }
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+std::string ReadFileToString(const std::string& filePath) {
+    return ReadFileToString(fs::path(filePath));
 }
 
 std::vector<char> ReadFileToVector(const std::string& filePath)
@@ -2594,7 +2672,7 @@ void PrintSimpleCallStack() {
 
 
 // Helper function to write a byte buffer to a file
-bool WriteBufferToFile(const std::string& filePath, const BYTE* data, DWORD size) {
+bool WriteBufferToFile(const fs::path& filePath, const BYTE* data, DWORD size) {
     std::ofstream file(filePath, std::ios::out | std::ios::binary);
     if (!file.is_open()) {
         return false;
@@ -3562,7 +3640,7 @@ void CopyFolderContents(const fs::path& src, const fs::path& dest)
 }
 std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
 {
-    std::string base64Str = ReadFileToString(input.string());
+    std::string base64Str = ReadFileToString(input);
     if (base64Str.empty())
     {
         std::cout << "[-] Error: Could not read input file or file is empty.\n";
@@ -3615,7 +3693,7 @@ std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
     }
     std::string ret=ParseDecryptedTextBlob(decryptedBlob);
     // 4. Save the decrypted plaintext to the output file
-    if (!WriteBufferToFile(output.string(), decryptedBlob.pbData, decryptedBlob.cbData)) 
+    if (!WriteBufferToFile(output, decryptedBlob.pbData, decryptedBlob.cbData))
     {
         std::cerr << "[-] Error: Failed to write decrypted data to output file.\n";
         LocalFree(decryptedBlob.pbData); // Ensure memory cleanup on failure
@@ -3630,9 +3708,10 @@ std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
 }
 
 
-char* read_file(const char* filename, size_t& size)
+char* read_file(const std::string& filename, size_t& size)
 {
-    FILE* fp = fopen(filename, "rb");
+    const std::wstring wide_filename = utf8_to_wide(filename);
+    FILE* fp = _wfopen(wide_filename.c_str(), L"rb");
     if (fp == NULL)
     {
         perror("Error opening file");
@@ -3942,53 +4021,63 @@ struct DrmParameters
 
 bool enumerateKindleFolder(const TCHAR* path, DrmParameters* out)
 {
-    if (out == nullptr) return false;
+    if (out == nullptr)
+    {
+        return false;
+    }
+
     WIN32_FIND_DATA ffd;
-    //LARGE_INTEGER filesize;
     TCHAR szDir[MAX_PATH];
-    size_t length_of_arg = 0;
     HANDLE hFind = INVALID_HANDLE_VALUE;
-    DWORD dwError = 0;
-    std::basic_string<TCHAR> conv = path;// std::basic_string<TCHAR>(path.begin(), path.end());
-    std::string shortPath = std::string(conv.begin(), conv.end());
+
+    const fs::path folder_path(path);
+
     StringCchCopy(szDir, MAX_PATH, path);
     StringCchCat(szDir, MAX_PATH, TEXT("\\*"));
+
     hFind = FindFirstFile(szDir, &ffd);
     if (hFind == INVALID_HANDLE_VALUE)
     {
         return false;
     }
+
     do
     {
-        std::basic_string<TCHAR> wfname = ffd.cFileName;
-        std::string fname = std::string(wfname.begin(), wfname.end());
-        std::string fullname = shortPath + "\\" + fname;
-        if (ends_with(fname, ".azw"))
+        const fs::path file_name(ffd.cFileName);
+        const fs::path full_path = folder_path / file_name;
+
+        const std::string file_name_utf8 =
+            wide_to_utf8(file_name.wstring());
+
+        const std::string full_path_utf8 =
+            wide_to_utf8(full_path.wstring());
+
+        if (ends_with(file_name_utf8, ".azw"))
         {
-            out->bookFile = fullname;
-            out->shortBookFile = fname;
-            //std::cout << "Bookname " << fullname << std::endl;
+            out->bookFile = full_path_utf8;
+            out->shortBookFile = file_name_utf8;
             continue;
         }
-        if (ends_with(fname, ".voucher"))
+
+        if (ends_with(file_name_utf8, ".voucher"))
         {
-            out->vouchers.push_back(fullname);
+            out->vouchers.push_back(full_path_utf8);
             continue;
         }
-        if (ends_with(fname, ".res") || ends_with(fname, ".md"))
+
+        if (ends_with(file_name_utf8, ".res") ||
+            ends_with(file_name_utf8, ".md"))
         {
-            out->resources.push_back(fullname);
-            out->shortResources.push_back(fname);
-            //std::cout << "Resource " << fullname << std::endl;
+            out->resources.push_back(full_path_utf8);
+            out->shortResources.push_back(file_name_utf8);
             continue;
         }
 
     } while (FindNextFile(hFind, &ffd) != 0);
-    FindClose(hFind);
-    if (out->bookFile.empty()) return false;
-    //if (out->vouchers.size() == 0) return false;
-    return true;
 
+    FindClose(hFind);
+
+    return !out->bookFile.empty();
 }
 
 
@@ -4099,7 +4188,7 @@ int processFile(const char* outputFile, const std::string& fname, const std::str
 {
 
     size_t bl = 0;
-    char* buf = read_file(fname.c_str(), bl);
+    char* buf = read_file(fname, bl);
     printf("Read file of %lu bytes\n", bl);
     if (bl == 0)
     {
