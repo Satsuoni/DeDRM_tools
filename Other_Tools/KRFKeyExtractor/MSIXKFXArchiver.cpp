@@ -583,80 +583,6 @@ std::vector<std::string> getK4Pids(const std::vector<char>& rec209, const std::v
 }
 
 
-std::wstring utf8_to_wide(const std::string& value)
-{
-    if (value.empty())
-    {
-        return L"";
-    }
-
-    const int size_needed = MultiByteToWideChar(
-        CP_UTF8,
-        0,
-        value.c_str(),
-        static_cast<int>(value.size()),
-        nullptr,
-        0
-    );
-
-    if (size_needed <= 0)
-    {
-        return L"";
-    }
-
-    std::wstring result(size_needed, L'\0');
-
-    MultiByteToWideChar(
-        CP_UTF8,
-        0,
-        value.c_str(),
-        static_cast<int>(value.size()),
-        &result[0],
-        size_needed
-    );
-
-    return result;
-}
-
-std::string wide_to_utf8(const std::wstring& value)
-{
-    if (value.empty())
-    {
-        return "";
-    }
-
-    const int size_needed = WideCharToMultiByte(
-        CP_UTF8,
-        0,
-        value.c_str(),
-        static_cast<int>(value.size()),
-        nullptr,
-        0,
-        nullptr,
-        nullptr
-    );
-
-    if (size_needed <= 0)
-    {
-        return "";
-    }
-
-    std::string result(size_needed, '\0');
-
-    WideCharToMultiByte(
-        CP_UTF8,
-        0,
-        value.c_str(),
-        static_cast<int>(value.size()),
-        &result[0],
-        size_needed,
-        nullptr,
-        nullptr
-    );
-
-    return result;
-}
-
 std::string ReadFileToString(const fs::path& filePath) {
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file.is_open()) {
@@ -665,19 +591,6 @@ std::string ReadFileToString(const fs::path& filePath) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-std::string ReadFileToString(const std::string& filePath) {
-    return ReadFileToString(fs::path(filePath));
-}
-
-std::vector<char> ReadFileToVector(const std::string& filePath)
-{
-    std::ifstream file(filePath, std::ios::in | std::ios::binary);
-    if (!file.is_open()) {
-        std::cout<<"Could not open" << strerror(errno) << std::endl;
-        return std::vector<char>();
-    }
-    return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-}
 std::vector<char> ReadFileToVector(const fs::path& filePath) 
 {
 
@@ -901,7 +814,7 @@ public:
         {
             endoff = sections[section + 1].offset;
         }
-        int off = sections[section].offset;
+        uint32_t off = sections[section].offset;
         if (off + in_off + sz > endoff)
         {
             std::cout << "ERROR* mobi patching exceeds data len" << std::endl;
@@ -970,8 +883,8 @@ public:
                         meta_array[type] = content;
                         if (type == 401 && size == 9)
                         {
-                            char b = 144;
-                            patchSection(0, &b, 1, 16 + mobi_length + pos + 8);
+                           unsigned char b = 144;
+                            patchSection(0, (char*) & b, 1, 16 + mobi_length + pos + 8);
                         }
                         if (type == 404 && size == 9)
                         {
@@ -1030,7 +943,7 @@ public:
         {
             rec209 = fnd->second;
             token.clear();
-            for (int i = 0; i < rec209.size(); i+=5)
+            for (size_t i = 0; i < rec209.size(); i+=5)
             {
                 uint32_t val = unpack_L(&rec209[i+1]);
                 auto fval = meta_array.find(val);
@@ -1214,10 +1127,10 @@ public:
             b.resize(drm_size);
             patchSection(0, &b[0], drm_size, drm_ptr);
             b.resize(16);
-            b[0] = 0xff;
-            b[1] = 0xff;
-            b[2] = 0xff;
-            b[3] = 0xff;
+            b[0] = -1;// 0xff;
+            b[1] = -1;// 0xff;
+            b[2] = -1;// 0xff;
+            b[3] = -1;// 0xff;
             patchSection(0, &b[0], 16, 0xA8);
         }
         if (fpid == "00000000")
@@ -3055,7 +2968,7 @@ void ReadKeySddl(NCRYPT_KEY_HANDLE hKey) {
             LPWSTR pszSddl = nullptr;
 
             // 3. Convert the binary structure to a readable SDDL string
-            if (ConvertSecurityDescriptorToStringSecurityDescriptorW(pSecDesc, SDDL_REVISION_1, secInfo, &pszSddl, NULL)) {
+            if (pSecDesc!=0&&ConvertSecurityDescriptorToStringSecurityDescriptorW(pSecDesc, SDDL_REVISION_1, secInfo, &pszSddl, NULL)) {
                 std::wcout << L"Key Permissions (SDDL): " << pszSddl << std::endl;
                 LocalFree(pszSddl);
             }
@@ -3201,7 +3114,7 @@ SECURITY_STATUS NCryptEncryptFake(
             DWORD             dwFlags
 )
 {
-    printf("Enc key: %p cbinput %d\n", hKey, cbInput);
+    printf("Enc key: %p cbinput %ul\n", (void*) hKey, cbInput);
     std::cout << "input " << hexStr(pbInput, cbInput) << std::endl;
     SECURITY_STATUS ret=NCryptEncrypt(hKey, pbInput, cbInput, pPaddingInfo, pbOutput, cbOutput, pcbResult, dwFlags);
     std::wcout << "NCryptEncryptFake result: " << ret << std::endl;
@@ -3693,7 +3606,7 @@ std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
     }
     std::string ret=ParseDecryptedTextBlob(decryptedBlob);
     // 4. Save the decrypted plaintext to the output file
-    if (!WriteBufferToFile(output, decryptedBlob.pbData, decryptedBlob.cbData))
+    if (!WriteBufferToFile(output, decryptedBlob.pbData, decryptedBlob.cbData)) 
     {
         std::cerr << "[-] Error: Failed to write decrypted data to output file.\n";
         LocalFree(decryptedBlob.pbData); // Ensure memory cleanup on failure
@@ -3705,54 +3618,6 @@ std::string decrypt_get_dsn(const fs::path& input, const fs::path& output)
     // 5. Clean up allocated DPAPI buffers
     LocalFree(decryptedBlob.pbData);
     return ret;
-}
-
-
-char* read_file(const std::string& filename, size_t& size)
-{
-    const std::wstring wide_filename = utf8_to_wide(filename);
-    FILE* fp = _wfopen(wide_filename.c_str(), L"rb");
-    if (fp == NULL)
-    {
-        perror("Error opening file");
-        return NULL;
-    }
-
-    if (fseek(fp, 0L, SEEK_END) != 0)
-    {
-        fclose(fp);
-        perror("Error seeking file end");
-        return NULL;
-    }
-
-    long long bufsize = _ftelli64(fp);
-    if (bufsize == -1)
-    {
-        fclose(fp);
-        perror("Error getting file size");
-        return NULL;
-    }
-    if (bufsize == 0)
-    {
-        return nullptr;
-    }
-    fseek(fp, 0L, SEEK_SET);
-    char* buffer = (char*)malloc(bufsize);
-    if (buffer == nullptr)
-    {
-        return NULL;
-    }
-    size_t len = fread(buffer, 1, bufsize, fp);
-    if (len == 0 || ferror(fp) != 0)
-    {
-        fclose(fp);
-        free(buffer);
-        perror("Error reading file");
-        return NULL;
-    }
-    fclose(fp);
-    size = len;
-    return buffer;
 }
 
 class BasicDecryptor
@@ -4010,74 +3875,65 @@ static bool starts_with(const std::string& str, const char* prefix)
 
 struct DrmParameters
 {
-    std::string bookFile;
-    std::string shortBookFile;
+    fs::path bookFile;
+    fs::path shortBookFile;
 
-    std::list<std::string> resources;
-    std::list<std::string> shortResources;
+    std::list<fs::path> resources;
+    std::list<fs::path> shortResources;
 
-    std::list<std::string> vouchers;
+    std::list<fs::path> vouchers;
 };
 
 bool enumerateKindleFolder(const TCHAR* path, DrmParameters* out)
 {
-    if (out == nullptr)
-    {
-        return false;
-    }
-
+    if (out == nullptr) return false;
     WIN32_FIND_DATA ffd;
+    //LARGE_INTEGER filesize;
     TCHAR szDir[MAX_PATH];
+    size_t length_of_arg = 0;
     HANDLE hFind = INVALID_HANDLE_VALUE;
-
-    const fs::path folder_path(path);
-
+    DWORD dwError = 0;
+    std::basic_string<TCHAR> conv = path;// std::basic_string<TCHAR>(path.begin(), path.end());
+    fs::path shortPath = fs::path(path);
+    //std::string shortPath = std::string(conv.begin(), conv.end());
     StringCchCopy(szDir, MAX_PATH, path);
     StringCchCat(szDir, MAX_PATH, TEXT("\\*"));
-
     hFind = FindFirstFile(szDir, &ffd);
     if (hFind == INVALID_HANDLE_VALUE)
     {
         return false;
     }
-
     do
     {
-        const fs::path file_name(ffd.cFileName);
-        const fs::path full_path = folder_path / file_name;
-
-        const std::string file_name_utf8 =
-            wide_to_utf8(file_name.wstring());
-
-        const std::string full_path_utf8 =
-            wide_to_utf8(full_path.wstring());
-
-        if (ends_with(file_name_utf8, ".azw"))
+        fs::path wfname = fs::path(ffd.cFileName);
+        //std::string fname = std::string(wfname.begin(), wfname.end());
+        const fs::path fullname = shortPath / wfname;
+        const std::wstring ext = fullname.extension().wstring();
+        if (ext==L".azw")
         {
-            out->bookFile = full_path_utf8;
-            out->shortBookFile = file_name_utf8;
+            out->bookFile = fullname;
+            out->shortBookFile = wfname;
+            //std::cout << "Bookname " << fullname << std::endl;
             continue;
         }
-
-        if (ends_with(file_name_utf8, ".voucher"))
+        if (ext == L".voucher")
         {
-            out->vouchers.push_back(full_path_utf8);
+            out->vouchers.push_back(fullname);
             continue;
         }
-
-        if (ends_with(file_name_utf8, ".res") ||
-            ends_with(file_name_utf8, ".md"))
+        if (ext == L".res" || ext == L".md")
         {
-            out->resources.push_back(full_path_utf8);
-            out->shortResources.push_back(file_name_utf8);
+            out->resources.push_back(fullname);
+            out->shortResources.push_back(fs::path(wfname));
+            //std::cout << "Resource " << fullname << std::endl;
             continue;
         }
 
     } while (FindNextFile(hFind, &ffd) != 0);
-
     FindClose(hFind);
-
+  
     return !out->bookFile.empty();
+
 }
 
 
@@ -4088,13 +3944,23 @@ int  tryOpeningBook(KrfAccessFunctions* ctx, const std::string& serial, const st
     memset((void*)sub, 0, sizeof(sub));
     std::list<std::string> secrets;
     secrets.push_back(secret);
-    ctx->DrmDataProvider((void*)sub, serial, secrets, params->vouchers);
+    std::list<std::string> cvouchers;
+    std::list<std::string> cres;
+    for (const auto& v : params->vouchers)
+    {
+        cvouchers.push_back(v.u8string());
+    }
+    for (const auto& v : params->resources)
+    {
+        cres.push_back(v.u8string());
+    }
+    ctx->DrmDataProvider((void*)sub, serial, secrets, cvouchers);
     void* bookFactory = ctx->GetBookFactory();
     std::shared_ptr<void*> rebook;
     krfErr err;
     err.code = 0;
     armed = true;
-    ctx->OpenBook(bookFactory, &rebook, params->bookFile, sub, &err, params->resources);
+    ctx->OpenBook(bookFactory, &rebook, params->bookFile.u8string(), sub, &err, cres);
     armed = false;
     if (err.code != 0)
     {
@@ -4151,6 +4017,17 @@ void accumulateOldSecrets(KrfAccessFunctions* ctx, const std::string& serial, st
 {
     if (oldSecretsAccumulated) return;
     std::cout << "Found KFX book that uses secrets, trying to accumulate older secrets" << std::endl;
+    std::list<std::string> cvouchers;
+    std::list<std::string> cres;
+    for (const auto& v : params->vouchers)
+    {
+        cvouchers.push_back(v.u8string());
+    }
+    for (const auto& v : params->resources)
+    {
+        cres.push_back(v.u8string());
+    }
+
     for (auto& secret : *secret_candidates)
     {
         keydataAccumulator.reset();
@@ -4158,13 +4035,13 @@ void accumulateOldSecrets(KrfAccessFunctions* ctx, const std::string& serial, st
         memset((void*)sub, 0, sizeof(sub));
         std::list<std::string> secrets;
         secrets.push_back(secret);
-        ctx->DrmDataProvider((void*)sub, serial, secrets, params->vouchers);
+        ctx->DrmDataProvider((void*)sub, serial, secrets,cvouchers);
         void* bookFactory = ctx->GetBookFactory();
         std::shared_ptr<void*> rebook;
         krfErr err;
         err.code = 0;
         armed = true;
-        ctx->OpenBook(bookFactory, &rebook, params->bookFile, sub, &err, params->resources);
+        ctx->OpenBook(bookFactory, &rebook, params->bookFile.u8string(), sub, &err, cres);
         armed = false;
 
         if (keydataAccumulator.old_secrets.size() > 0)
@@ -4183,33 +4060,120 @@ std::string hexhex(const std::string& st)
 {
     return hexStr((uint8_t*)st.c_str(), st.size());
 }
+std::wstring utf8_to_widechar(const char* str)
+{
+    int reqChars = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
+    //WCHAR* wStr = (WCHAR*)malloc(reqChars * sizeof(WCHAR));
+    std::wstring ret(reqChars, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str, -1, &ret[0], reqChars);
+    return ret;
+}
+std::string widechar_to_utf8(const std::wstring& wstr) {
+    if (wstr.empty()) 
+    {
+        return std::string();
+    }
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), (int)(wstr.length()), nullptr, 0, nullptr, nullptr);
+    if (size_needed <= 0) 
+    {
+       std::cout<< ("WideCharToMultiByte failed to calculate size.")<<std::endl;
+       return std::string();
+    }
+    std::string result(size_needed, 0);
 
-int processFile(const char* outputFile, const std::string& fname, const std::string& archivedName, BasicDecryptor* decr)
+    int result_size = WideCharToMultiByte(CP_UTF8, 0,wstr.c_str(),(int)(wstr.length()), &result[0], size_needed,nullptr, nullptr);
+
+    if (result_size <= 0) 
+    {
+        std::cout << "WideCharToMultiByte failed to convert string." << std::endl;
+        return std::string();
+    }
+
+    return result;
+}
+
+int rmz_stat64(const wchar_t* path, struct __stat64* buffer)
+{
+    int res = _wstat64(path, buffer);
+    return res;
+}
+mz_bool mz_open(mz_zip_archive* archive, const fs::path& filename, mz_uint level_and_flags, mz_zip_error* pErr)
+{
+
+    if (!archive) 
+    {
+        if (pErr) *pErr = MZ_ZIP_BUF_TOO_SMALL;
+        return false;
+    }
+    mz_zip_zero_struct(archive);
+    mz_bool status;
+    status = mz_zip_writer_init_file_v2(archive, filename.u8string().c_str(), 0, level_and_flags);
+    if (!status)
+    {
+        if (pErr) *pErr = archive->m_last_error;
+    }
+    return status;
+}
+mz_bool mz_add(mz_zip_archive* archive, const char* pArchive_name, const void* pBuf, size_t buf_size, mz_uint level_and_flags, mz_zip_error* pErr)
+{
+    mz_bool status;
+    status = mz_zip_writer_add_mem_ex(archive, pArchive_name, pBuf, buf_size, NULL, 0, level_and_flags, 0, 0);
+    if (pErr != NULL)
+    {
+        *pErr = archive->m_last_error;
+    }
+    return status;
+}
+mz_bool mz_close(mz_zip_archive* archive, mz_zip_error* pErr)
+{
+    mz_bool status=MZ_TRUE;
+    if (!archive)
+    {
+        if (pErr) *pErr = MZ_ZIP_BUF_TOO_SMALL;
+        return false;
+    }
+    /* Always finalize, even if adding failed for some reason, so we have a valid central directory. (This may not always succeed, but we can try.) */
+    if (!mz_zip_writer_finalize_archive(archive))
+    {
+        if (pErr) *pErr =archive->m_last_error;
+
+        status = MZ_FALSE;
+    }
+
+    if (!mz_zip_writer_end(archive))
+    {
+        if (pErr) *pErr = archive->m_last_error;
+
+        status = MZ_FALSE;
+    }
+    return status;
+}
+
+
+int processFile(mz_zip_archive* archive, const fs::path& fname, const std::string& archivedName, BasicDecryptor* decr)
 {
 
     size_t bl = 0;
-    char* buf = read_file(fname, bl);
+    //char* buf =  /// read_file(fname.c_str(), bl);
+    std::vector<char> buf = ReadFileToVector(fname);
+    bl = buf.size();
     printf("Read file of %lu bytes\n", bl);
     if (bl == 0)
     {
         return 0;
     }
-    if (buf == nullptr)
-    {
-        printf("Could not read file? \n");
-        return 1;
-    }
-    if (bl > drmionHeader.size() && memcmp(&drmionHeader[0], buf, drmionHeader.size()) == 0)
+ 
+    if (bl > drmionHeader.size() && memcmp(&drmionHeader[0], &buf[0], drmionHeader.size()) == 0)
     {
         std::vector<uint8_t> outme;
         printf("Decrypting DRMION... \n");
         if (processDRMION(&buf[8], bl - 16, decr, outme))
         {
-            mz_bool status = mz_zip_add_mem_to_archive_file_in_place(outputFile, archivedName.c_str(), outme.data(), outme.size(), NULL, 0, MZ_BEST_COMPRESSION);
+            mz_zip_error err=MZ_ZIP_NO_ERROR;
+            mz_bool status = mz_add(archive, archivedName.c_str(), outme.data(), outme.size(), MZ_BEST_COMPRESSION,&err);
             if (!status)
             {
-                printf("mz_zip_add_mem_to_archive_file_in_place of DRMION file  failed!\n");
-                free(buf);
+                printf("mz_add of DRMION file  failed! Error: %s \n", mz_zip_get_error_string(err));
                 return EXIT_FAILURE;
             }
             printf("DRMION decrypted and saved.\n");
@@ -4217,7 +4181,6 @@ int processFile(const char* outputFile, const std::string& fname, const std::str
         else
         {
             printf("Could not decrypt DRMION? \n");
-            free(buf);
             return 2;
         }
     }
@@ -4225,16 +4188,13 @@ int processFile(const char* outputFile, const std::string& fname, const std::str
     {
       //  mz_zip_add_mem_to_archive_file_in_place_v2(pZip_filename, pArchive_name, pBuf, buf_size, pComment, comment_size, level_and_flags, NULL);
         mz_zip_error err;
-        mz_bool status = mz_zip_add_mem_to_archive_file_in_place_v2(outputFile, archivedName.c_str(), buf, bl, NULL, 0, MZ_BEST_COMPRESSION,&err);
+        mz_bool status = mz_add(archive, archivedName.c_str(), &buf[0], bl, MZ_BEST_COMPRESSION, &err);
         if (!status)
         {
-            printf("mz_zip_add_mem_to_archive_file_in_place of non-DRM file failed for %s! Error: %s \n", archivedName.c_str(), mz_zip_get_error_string(err));
-            free(buf);
+            printf("mz_add of non-DRM file failed for %s! Error: %s \n", archivedName.c_str(), mz_zip_get_error_string(err));
             return EXIT_FAILURE;
         }
     }
-
-    free(buf);
     return 0;
 }
 
@@ -4441,10 +4401,12 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                             {
                                 try
                                 {
-                                    fs::path out_path = fs::path(outdir) / fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension());
+                                    fs::path oname = params.shortBookFile;
+                                    oname.replace_extension(mb.getBookExtension());
+                                    fs::path out_path = fs::path(outdir) / oname;
                                     if (fs::exists(out_path))
                                     {
-                                        std::cout << "File " << fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension()) << " already exists in the output folder" << std::endl;
+                                        std::cout << "File " << oname << " already exists in the output folder" << std::endl;
                                         std::cout << "Skipping" << std::endl;
                                         mobiProc = true;
                                     }
@@ -4525,10 +4487,12 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                                 {
                                     try
                                     {
-                                        fs::path out_path = fs::path(outdir) / fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension());
+                                        fs::path oname = params.shortBookFile;
+                                        oname.replace_extension(mb.getBookExtension());
+                                        fs::path out_path = fs::path(outdir) /oname;
                                         if (fs::exists(out_path))
                                         {
-                                            std::cout << "File " << fs::path(remove_extension(base_name(params.shortBookFile)) + mb.getBookExtension()) << " already exists in the output folder" << std::endl;
+                                            std::cout << "File " << oname << " already exists in the output folder" << std::endl;
                                             std::cout << "Skipping" << std::endl;
                                             mobiProc = true;
                                         }
@@ -4579,7 +4543,9 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                 if (opened)
                 {
                     //std::string output_name = outdir + std::string("\\") + remove_extension(base_name(params.shortBookFile)) + ".kfx-zip";
-                    fs::path oname = fs::path(remove_extension(base_name(params.shortBookFile)) + ".kfx-zip");
+                    fs::path oname = params.shortBookFile;
+                    oname.replace_extension(".kfx-zip");
+                    //fs::path(params.shortBookFile.replace_extension(mb.getBookExtension()))
                     fs::path output_path = fs::path(outdir) / oname ;
                     if (fs::exists(output_path))
                     {
@@ -4619,15 +4585,32 @@ void enumerateKindleDir(const TCHAR* path, const std::string& outdir, std::set<s
                         if (opened)
                         {
                             std::cout << "Removal result " << std::remove(output_path.string().c_str()) << std::endl; //clear if exists
-                            processFile(output_path.string().c_str(), params.bookFile, params.shortBookFile, decr);
-                            auto it1 = params.resources.begin();
-                            auto it2 = params.shortResources.begin();
-                            while (it1 != params.resources.end() && it2 != params.shortResources.end())
+                            mz_zip_archive arch;
+                            mz_zip_error err;
+                            if (!mz_open(&arch, output_path, MZ_BEST_COMPRESSION, &err))
                             {
-                                processFile(output_path.string().c_str(), *it1, *it2, decr);
-                                ++it1;
-                                ++it2;
+                                std::wcout << output_path << std::endl;
+                                printf("Could not open zip file for output: %s \n", mz_zip_get_error_string(err));
                             }
+                            else
+                            {
+                                processFile(&arch, params.bookFile, params.shortBookFile.u8string(), decr);
+                                auto it1 = params.resources.begin();
+                                auto it2 = params.shortResources.begin();
+                                while (it1 != params.resources.end() && it2 != params.shortResources.end())
+                                {
+                                    processFile(&arch, *it1, it2->u8string(), decr);
+                                    ++it1;
+                                    ++it2;
+                                }
+                                if (!mz_close(&arch, &err))
+                                {
+                                    printf("Could not close  zip file: %s \n", mz_zip_get_error_string(err));
+                                }
+
+                            }
+                           
+                            
                             delete decr;
                         }
                     }
@@ -4753,7 +4736,7 @@ std::vector<fs::path> find_valid_subfolders(const fs::path& dir_path)
 
     return subfolders;
 }
-int main(int argc, char* argv[])
+int wmain(int argc, wchar_t * argv[])
 {
     std::map<std::string, ExecOffsets> supportMap;
     supportMap["a03451fe70e83bee2a0e8979667cc2a6"] = KindleReader1_0_15230();
@@ -4782,7 +4765,7 @@ int main(int argc, char* argv[])
     fs::path external_load;
     if (argc >= 5)
     {  
-        if(std::string(argv[4])!="default")
+        if(std::wstring(argv[4])!=L"default")
         {
         external_load = fs::path(argv[4]);
 
@@ -5063,12 +5046,12 @@ int main(int argc, char* argv[])
     fs::path default_book_dir = fs::path(localcappdata) / L"Packages" / dat[0].family_name / L"LocalState" / L"Classic" / L"Content";
     if (argc >= 2)
     {
-        if(std::string(argv[1])!="default")  default_book_dir = current_dir / fs::path(argv[1]);
+        if(std::wstring(argv[1])!=L"default")  default_book_dir = current_dir / fs::path(argv[1]);
     }
     fs::path default_output = current_dir / "archived_kfx";
     if (argc >= 3)
     {
-        if (std::string(argv[2]) != "default")  default_output = current_dir / fs::path(argv[2]);
+        if (std::wstring(argv[2]) != L"default")  default_output = current_dir / fs::path(argv[2]);
     }
     std::cout <<"Book folder "<< default_book_dir << std::endl;
 
@@ -5086,7 +5069,7 @@ int main(int argc, char* argv[])
   
     if (argc >= 4)
     {
-        if (std::string(argv[3]) != "default") k4path = current_dir / fs::path(argv[3]);
+        if (std::wstring(argv[3]) != L"default") k4path = current_dir / fs::path(argv[3]);
     }
     std::string kfile = k4path.string();
     std::cout << "Target k4i file" << kfile << std::endl;
