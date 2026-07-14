@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <algorithm>
 #include <execinfo.h>
 #define POCKETLZMA_LZMA_C_DEFINE
 #include "plusaes.hpp" //https://github.com/kkAyataka/plusaes/releases
@@ -2311,10 +2312,24 @@ void install_hook(void *lib_symbol)
   real_free = (fr)dlsym(RTLD_NEXT, "free");
   real_dlopen = (dlo)dlsym(RTLD_NEXT, "dlopen");
   real_mcreate = (crstr)dlsym(RTLD_NEXT, "_ZNSsC1ERKSs");
-  aesDecrypt_real=(aesDecrypt)dlsym(dlopen("/usr/lib/libcrypto.so",RTLD_NOW),"EVP_DecryptInit_ex");
-  decryptUpdate_real=(decryptUpdate)dlsym(dlopen("/usr/lib/libcrypto.so",RTLD_NOW),"EVP_DecryptUpdate");
-  decryptFinal_real=(decryptFinal_ex)dlsym(dlopen("/usr/lib/libcrypto.so",RTLD_NOW),"EVP_DecryptFinal_ex");
-  key_len_real=(keylen)dlsym(dlopen("/usr/lib/libcrypto.so",RTLD_NOW),"EVP_CIPHER_key_length");
+  void * chandle=dlopen("/usr/lib/libcrypto.so",RTLD_NOW);
+  printf("Openssl handle: %p\n",chandle);
+  aesDecrypt_real=(aesDecrypt)dlsym(chandle,"EVP_DecryptInit_ex");
+  decryptUpdate_real=(decryptUpdate)dlsym(chandle,"EVP_DecryptUpdate");
+  decryptFinal_real=(decryptFinal_ex)dlsym(chandle,"EVP_DecryptFinal_ex");
+  
+  key_len_real=(keylen)dlsym(chandle,"EVP_CIPHER_key_length");
+  if(key_len_real==nullptr)
+  {
+    key_len_real=(keylen)dlsym(chandle,"EVP_CIPHER_get_key_length");
+  }
+  if(key_len_real==nullptr)
+  {
+    printf("Could not find key length routine, unsupported OpenSSL? \n");
+    printf("%p \n",aesDecrypt_real);
+    exit(2);
+  }
+  printf("aesDecrypt %p decryptUpdate %p decryptFinal %p key_len %p \n",aesDecrypt_real,decryptUpdate_real,decryptFinal_real,key_len_real);
   plthook_t *plthook;
 
   if (plthook_open_by_address(&plthook, lib_symbol) != 0)
@@ -2354,8 +2369,8 @@ std::vector<std::string> split_secrets(const std::string& secrfile)
 
     return result;
 }
-
-void updatemenufile(const std::vector<fs::path>&books)
+// length over 36 will get mid-clipped by first 16 and last 17 symbols 
+void updatemenufile(const std::vector<fs::path>&books,bool truncate)
 {
   std::string expected_menu="/mnt/us/extensions/kfxdedrm/menu.json";
    std::ifstream file(expected_menu);
@@ -2367,10 +2382,18 @@ void updatemenufile(const std::vector<fs::path>&books)
     json data = json::parse(file);
     json alist=json::array();
     alist.push_back({{"name","Scan documents folder"},{"action", "bin/run_cmd.sh"},{"params","scan"},{"priority",1}});
-    int p=2;
+    alist.push_back({{"name","Scan documents folder (truncate names)"},{"action", "bin/run_cmd.sh"},{"params","scantruncate"},{"priority",2}});
+    int p=3;
     for(const auto& pth:books)
     {
       std::string bname=pth.stem();
+      if (truncate&&bname.length()>40)
+      {
+        std::string front=bname.substr(0,16);
+        std::string back=bname.substr(bname.length()-17);
+        bname=front+"..."+back;
+        std::replace(bname.begin(), bname.end(), ' ', '_');
+      }
       std::string fpath=pth.string();
       alist.push_back({{"name",bname},{"action", "bin/run_cmd.sh"},{"params",std::string("dedrm \"")+fpath+"\""},{"priority",p}});
       p++;
@@ -3363,11 +3386,13 @@ int main(int argc, char *argv[])
   std::vector<std::string> jsecrets;
   std::string mode="decrypt_all";
   fs::path sngl;
+  bool truncate=false;
   if (argc>1)
   {
     std::string cmd=argv[1];
     if(cmd=="test") mode="test";
     if(cmd=="scan") mode="scan";
+    if(cmd=="scantruncate") {mode="scan";truncate=true;}
     if(cmd=="keyfile") mode="keyfile";
     if(cmd=="dedrm") 
     {
@@ -3388,7 +3413,7 @@ int main(int argc, char *argv[])
     scan_folder_for_book_candidates(inpath, infiles);
     mobi_scan(inpath, infiles);
     }
-    updatemenufile(infiles);
+    updatemenufile(infiles,truncate);
     return 0;
   }
   // open shared library
@@ -3552,6 +3577,12 @@ std::ofstream outkeyfile;
     std::string bookid = itm.stem().string();
     std::cout << bookid << std::endl;
     std::map<std::string, std::vector<fs::path>> metadata;
+    fs::path output_path = out_folder / fs::path(bookid + ".kfx-zip");
+    if(fs::is_regular_file(output_path))
+    {
+      std::cout << "Archive " <<output_path<< " already exists, skipping... Delete it if you want to rerun. " << std::endl;
+      continue;
+    }
     if (process_assets(bookid, itm, metadata))
     {
       key_candidates.clear();
@@ -3602,7 +3633,7 @@ std::ofstream outkeyfile;
         else 
         {
         AesDecryptor decr(result[0]);
-        fs::path output_path = out_folder / fs::path(bookid + ".kfx-zip");
+        
         std::cout << "Generating " << output_path << std::endl;
         std::cout << "Removal result " << std::remove(output_path.string().c_str()) << std::endl; // clear if exists
         for (auto fl : metadata["resources"])

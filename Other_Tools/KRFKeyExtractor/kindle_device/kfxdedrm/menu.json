@@ -17,7 +17,9 @@
     },
     {"name": "Books", "priority":6,
       "items": [
-         {"name":"Scan documents folder","action": "bin/run_cmd.sh","params":"scan", "priority":1}
+         {"name":"Scan documents folder","action": "bin/run_cmd.sh","params":"scan", "priority":1},
+         {"name":"Scan documents folder (truncate names)","action": "bin/run_cmd.sh","params":"scantruncate", "priority":2}
+         
        ]
      }
 
