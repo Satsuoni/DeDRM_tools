@@ -33,8 +33,7 @@ class SafeUnbuffered:
         if self.encoding == None:
             self.encoding = "utf-8"
     def write(self, data):
-        if isinstance(data,str) or isinstance(data,unicode):
-            # str for Python3, unicode for Python2
+        if isinstance(data, str):
             data = data.encode(self.encoding,"replace")
         try:
             buffer = getattr(self.stream, 'buffer', self.stream)
