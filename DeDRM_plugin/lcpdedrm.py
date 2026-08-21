@@ -29,7 +29,6 @@ __version__ = "2"
 
 import json
 from zipfile import ZipFile
-from contextlib import closing
 
 
 class LCPError(Exception):
@@ -38,7 +37,7 @@ class LCPError(Exception):
 # Check file to see if this is an LCP-protected file
 def isLCPbook(inpath):
     try: 
-        with closing(ZipFile(open(inpath, 'rb'))) as lcpbook:
+        with ZipFile(inpath, 'r') as lcpbook:
             if ("META-INF/license.lcpl" not in lcpbook.namelist() or
                 "META-INF/encryption.xml" not in lcpbook.namelist() or
                 b"EncryptedContentKey" not in lcpbook.read("META-INF/encryption.xml")):

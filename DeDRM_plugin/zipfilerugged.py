@@ -3,6 +3,13 @@
 
 """
 Read and write ZIP files.
+
+NOTE: This is a Python 2-era fork of the stdlib zipfile module that still
+contains py2 leftovers (bytes member names, 'unicode', operator precedence
+in MAX_N, ZIP64 end-of-central-directory sizing). The only in-repo consumer
+is zipfix.py, which uses it consistently with bytes names and has been
+verified to round-trip EPUB containers. Prefer the stdlib zipfile module
+for any new code.
 """
 import struct, os, time, sys, shutil
 import binascii, stat

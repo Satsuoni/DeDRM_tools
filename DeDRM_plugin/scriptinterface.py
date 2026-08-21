@@ -39,7 +39,7 @@ def decryptepub(infile, outdir, rscpath):
     if  ineptepub.adeptBook(zippath):
         # try with any keyfiles (*.der) in the rscpath
         files = os.listdir(rscpath)
-        filefilter = re.compile("\.der$", re.IGNORECASE)
+        filefilter = re.compile(r"\.der$", re.IGNORECASE)
         files = filter(filefilter.search, files)
         if files:
             for filename in files:
@@ -58,7 +58,7 @@ def decryptepub(infile, outdir, rscpath):
         # now try with ignoble epub
         # try with any keyfiles (*.b64) in the rscpath
         files = os.listdir(rscpath)
-        filefilter = re.compile("\.b64$", re.IGNORECASE)
+        filefilter = re.compile(r"\.b64$", re.IGNORECASE)
         files = filter(filefilter.search, files)
         if files:
             for filename in files:
@@ -98,7 +98,7 @@ def decryptpdf(infile, outdir, rscpath):
 
     # try with any keyfiles (*.der) in the rscpath
     files = os.listdir(rscpath)
-    filefilter = re.compile("\.der$", re.IGNORECASE)
+    filefilter = re.compile(r"\.der$", re.IGNORECASE)
     files = filter(filefilter.search, files)
     if files:
         for filename in files:
@@ -167,7 +167,7 @@ def decryptk4mobi(infile, outdir, rscpath):
             serialnums = serialstr.split(',')
     kDatabaseFiles = []
     files = os.listdir(rscpath)
-    filefilter = re.compile("\.k4i$", re.IGNORECASE)
+    filefilter = re.compile(r"\.k4i$", re.IGNORECASE)
     files = filter(filefilter.search, files)
     if files:
         for filename in files:
@@ -175,21 +175,21 @@ def decryptk4mobi(infile, outdir, rscpath):
             kDatabaseFiles.append(dpath)
     androidFiles = []
     files = os.listdir(rscpath)
-    filefilter = re.compile("\.ab$", re.IGNORECASE)
+    filefilter = re.compile(r"\.ab$", re.IGNORECASE)
     files = filter(filefilter.search, files)
     if files:
         for filename in files:
             dpath = os.path.join(rscpath,filename)
             androidFiles.append(dpath)
     files = os.listdir(rscpath)
-    filefilter = re.compile("\.db$", re.IGNORECASE)
+    filefilter = re.compile(r"\.db$", re.IGNORECASE)
     files = filter(filefilter.search, files)
     if files:
         for filename in files:
             dpath = os.path.join(rscpath,filename)
             androidFiles.append(dpath)
     files = os.listdir(rscpath)
-    filefilter = re.compile("\.xml$", re.IGNORECASE)
+    filefilter = re.compile(r"\.xml$", re.IGNORECASE)
     files = filter(filefilter.search, files)
     if files:
         for filename in files:

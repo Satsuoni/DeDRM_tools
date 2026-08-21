@@ -199,7 +199,7 @@ def convert2SVG(gdict, flat_xml, pageid, previd, nextid, svgDir, raw, meta_array
         mlst.append('<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" ><head>\n')
         mlst.append('<title>Page %d - %s by %s</title>\n' % (pageid, meta_array['Title'],meta_array['Authors']))
         mlst.append('<script><![CDATA[\n')
-        mlst.append('function gd(){var p=window.location.href.replace(/^.*\?dpi=(\d+).*$/i,"$1");return p;}\n')
+        mlst.append('function gd(){var p=window.location.href.replace(/^.*\\?dpi=(\\d+).*$/i,"$1");return p;}\n')
         mlst.append('var dpi=%d;\n' % scaledpi)
         if (previd) :
             mlst.append('var prevpage="page%04d.xhtml";\n' % (previd))
