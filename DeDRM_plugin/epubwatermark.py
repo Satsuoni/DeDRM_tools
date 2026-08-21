@@ -139,7 +139,7 @@ def removeHTMLwatermarks(object, path_to_ebook):
                         zi.create_system = oldzi.create_system
                         zi.create_version = oldzi.create_version
 
-                        if any(ord(c) >= 128 for c in path) or any(ord(c) >= 128 for c in zi.comment):
+                        if any(ord(c) >= 128 for c in path) or any(c >= 128 for c in zi.comment):
                             # If the file name or the comment contains any non-ASCII char, set the UTF8-flag
                             zi.flag_bits |= 0x800
                     except:
@@ -276,7 +276,7 @@ def removeOPFwatermarks(object, path_to_ebook):
                         zi.create_system = oldzi.create_system
                         zi.create_version = oldzi.create_version
 
-                        if any(ord(c) >= 128 for c in path) or any(ord(c) >= 128 for c in zi.comment):
+                        if any(ord(c) >= 128 for c in path) or any(c >= 128 for c in zi.comment):
                             # If the file name or the comment contains any non-ASCII char, set the UTF8-flag
                             zi.flag_bits |= 0x800
                     except:
@@ -352,7 +352,7 @@ def removeWatermarkFiles(object, path_to_ebook):
                     zi.create_system = oldzi.create_system
                     zi.create_version = oldzi.create_version
 
-                    if any(ord(c) >= 128 for c in path) or any(ord(c) >= 128 for c in zi.comment):
+                    if any(ord(c) >= 128 for c in path) or any(c >= 128 for c in zi.comment):
                         # If the file name or the comment contains any non-ASCII char, set the UTF8-flag
                         zi.flag_bits |= 0x800
                 except:
