@@ -1027,7 +1027,7 @@ class DeDRM(FileTypePlugin):
         self.starttime = time.time()
 
         booktype = os.path.splitext(path_to_ebook)[1].lower()[1:]
-        if booktype in ['prc','mobi','pobi','azw','azw1','azw3','azw4','tpz','kfx-zip']:
+        if booktype in ['prc','mobi','pobi','azw','azw1','azw3','azw4','azw8','tpz','kfx','kfx-zip']:
             # Kindle/Mobipocket
             decrypted_ebook = self.KindleMobiDecrypt(path_to_ebook)
         elif booktype == 'pdb':
