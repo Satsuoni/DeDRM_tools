@@ -603,12 +603,14 @@ class ManageKeysDialog(QDialog):
                 with open(fpath,'rb') as keyfile:
                     new_key_value = keyfile.read()
                 if self.binary_file:
-                    new_key_value = codecs.encode(new_key_value,'hex')
+                    new_key_value = codecs.encode(new_key_value,'hex').decode('ascii')
                 elif self.json_file:
                     new_key_value = json.loads(new_key_value)
                 elif self.android_file:
-                    # convert to list of the keys in the string
-                    new_key_value = new_key_value.splitlines()
+                    # convert to list of the serials in the file (JSON-safe str, one per line)
+                    new_key_value = [line.decode('utf-8', 'replace').strip()
+                                     for line in new_key_value.splitlines()
+                                     if line.strip()]
                 match = False
                 for key in self.plugin_keys.keys():
                     if uStrCmp(new_key_name, key, True):
@@ -1115,7 +1117,7 @@ class AddBandNKeyDialog(QDialog):
 
         try: 
             from ignoblekeyGenPassHash import generate_key
-            self.result_data = generate_key(self.user_name, self.cc_number)
+            self.result_data = generate_key(self.user_name, self.cc_number).decode('ascii')
         except: 
             errmsg = "Key generation failed."
             return error_dialog(None, "{0} {1}".format(PLUGIN_NAME, PLUGIN_VERSION), errmsg, show=True, show_copy_button=False)
@@ -1183,7 +1185,7 @@ class AddEReaderDialog(QDialog):
     @property
     def key_value(self):
         from erdr2pml import getuser_key as generate_ereader_key
-        return codecs.encode(generate_ereader_key(self.user_name, self.cc_number),'hex')
+        return codecs.encode(generate_ereader_key(self.user_name, self.cc_number),'hex').decode('ascii')
 
     @property
     def user_name(self):
