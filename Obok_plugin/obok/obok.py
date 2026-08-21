@@ -239,6 +239,88 @@ class SafeUnbuffered:
         return getattr(self.stream, attr)
 
 
+# Locating the Kobo Desktop Edition database on Linux.
+# Fast path: the known Windows-profile layouts, inside Wine prefixes under the
+# user's home or on a mounted Windows partition. Slow path: a bounded walk of
+# the home directory only (mount roots can be arbitrarily large).
+KOBODIR_LINUX_ROOTS = ('~', '/media', '/mnt', '/run/media')
+KOBODIR_LINUX_PROFILE_GLOBS = (
+    '.wine*/drive_c/users/*',
+    '.local/share/wineprefixes/*/drive_c/users/*',
+    '.PlayOnLinux/wineprefix/*/drive_c/users/*',
+    '.var/app/*/data/wine/drive_c/users/*',   # flatpak Wine
+    'Users/*',                                # mounted Windows partition
+    '*/Users/*',                              # ... one level down (/media/<user>/<disk>/Users)
+)
+KOBO_DESKTOP_SUBDIRS = (
+    os.path.join('AppData', 'Local', 'Kobo', 'Kobo Desktop Edition'),
+    os.path.join('Local Settings', 'Application Data', 'Kobo', 'Kobo Desktop Edition'),
+)
+KOBODIR_LINUX_WALK_MAX_DEPTH = 12
+KOBODIR_LINUX_WALK_MAX_DIRS = 100000
+KOBODIR_LINUX_PRUNE_DIRS = frozenset(('.cache', '.git', 'node_modules', '__pycache__'))
+
+def find_kobodir_linux():
+    """Return the first directory containing Kobo.sqlite, or None.
+
+    Checks the known Wine / Windows profile locations first, then falls back
+    to a walk of the home directory that is bounded both in depth and in the
+    number of directories visited, stopping at the first hit.
+
+    :return: str or None
+    """
+    import glob
+    for root in KOBODIR_LINUX_ROOTS:
+        root = os.path.expanduser(root)
+        if not os.path.isdir(root):
+            continue
+        for pattern in KOBODIR_LINUX_PROFILE_GLOBS:
+            for profile in sorted(glob.glob(os.path.join(root, pattern))):
+                for subdir in KOBO_DESKTOP_SUBDIRS:
+                    candidate = os.path.join(profile, subdir)
+                    if os.path.isfile(os.path.join(candidate, 'Kobo.sqlite')):
+                        return candidate
+
+    home = os.path.expanduser('~')
+    base_depth = home.rstrip(os.sep).count(os.sep)
+    visited = 0
+    for dirpath, dirnames, filenames in os.walk(home):
+        if 'Kobo.sqlite' in filenames:
+            return dirpath
+        visited += 1
+        if visited >= KOBODIR_LINUX_WALK_MAX_DIRS:
+            break
+        if dirpath.count(os.sep) - base_depth >= KOBODIR_LINUX_WALK_MAX_DEPTH:
+            dirnames[:] = []   # os.walk API: prune in place
+            continue
+        dirnames[:] = [d for d in dirnames if d not in KOBODIR_LINUX_PRUNE_DIRS]
+    return None
+
+def cached_kobodir_linux():
+    """Locate the Kobo Desktop directory on Linux, caching the result in
+    ~/.config/calibre/"kobo location" so the search only runs once. A stale
+    cache entry (Kobo.sqlite no longer there) is discarded and refreshed.
+
+    :return: str or None
+    """
+    cache_dir = os.path.join(os.path.expanduser('~'), ".config", "calibre")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, "kobo location")
+
+    if os.path.isfile(cache_file):
+        with open(cache_file, 'r') as f:
+            cached = f.read().strip()
+        if cached and os.path.isfile(os.path.join(cached, "Kobo.sqlite")):
+            return cached
+        os.remove(cache_file)
+
+    found = find_kobodir_linux()
+    if found is not None:
+        with open(cache_file, 'w') as f:
+            f.write(found)
+    return found
+
+
 class KoboLibrary(object):
     """The Kobo library.
 
@@ -305,53 +387,23 @@ class KoboLibrary(object):
 
             if (self.kobodir == u""):
                 if sys.platform.startswith('win'):
-                    try:
-                        import winreg
-                    except ImportError:
-                        import _winreg as winreg
                     if sys.getwindowsversion().major > 5:
-                        if 'LOCALAPPDATA' in os.environ.keys():
-                            # Python 2.x does not return unicode env. Use Python 3.x
-                            if sys.version_info[0] == 2:
-                                self.kobodir = winreg.ExpandEnvironmentStrings(u"%LOCALAPPDATA%")
-                            else: 
-                                self.kobodir = winreg.ExpandEnvironmentStrings("%LOCALAPPDATA%")
+                        if 'LOCALAPPDATA' in os.environ:
+                            self.kobodir = os.environ['LOCALAPPDATA']
                     if (self.kobodir == u""):
-                        if 'USERPROFILE' in os.environ.keys():
-                            # Python 2.x does not return unicode env. Use Python 3.x
-                            if sys.version_info[0] == 2:
-                                self.kobodir = os.path.join(winreg.ExpandEnvironmentStrings(u"%USERPROFILE%"), "Local Settings", "Application Data")
-                            else: 
-                                self.kobodir = os.path.join(winreg.ExpandEnvironmentStrings("%USERPROFILE%"), "Local Settings", "Application Data")
+                        if 'USERPROFILE' in os.environ:
+                            self.kobodir = os.path.join(os.environ['USERPROFILE'], "Local Settings", "Application Data")
                     self.kobodir = os.path.join(self.kobodir, "Kobo", "Kobo Desktop Edition")
                 elif sys.platform.startswith('darwin'):
                     self.kobodir = os.path.join(os.environ['HOME'], "Library", "Application Support", "Kobo", "Kobo Desktop Edition")
                 elif sys.platform.startswith('linux'):
-
-                    #sets ~/.config/calibre as the location to store the kobodir location info file and creates this directory if necessary
-                    kobodir_cache_dir = os.path.join(os.environ['HOME'], ".config", "calibre")
-                    if not os.path.isdir(kobodir_cache_dir):
-                        os.mkdir(kobodir_cache_dir)
-                    
-                    #appends the name of the file we're storing the kobodir location info to the above path
-                    kobodir_cache_file = str(kobodir_cache_dir) + "/" + "kobo location"
-                    
-                    """if the above file does not exist, recursively searches from the root
-                    of the filesystem until kobodir is found and stores the location of kobodir
-                    in that file so this loop can be skipped in the future"""
-                    original_stdout = sys.stdout
-                    if not os.path.isfile(kobodir_cache_file):
-                        for root, dirs, files in os.walk('/'):
-                            for file in files:
-                                if file == 'Kobo.sqlite':
-                                    kobo_linux_path = str(root)
-                                    with open(kobodir_cache_file, 'w') as f:
-                                        sys.stdout = f
-                                        print(kobo_linux_path, end='')
-                                        sys.stdout = original_stdout
-
-                    f = open(kobodir_cache_file, 'r' )
-                    self.kobodir = f.read()
+                    found = cached_kobodir_linux()
+                    if found is None:
+                        print("Kobo.sqlite not found under {0}. If Kobo Desktop is installed elsewhere, "
+                              "set the Kobo directory in the Obok plugin settings.".format(
+                              ", ".join(KOBODIR_LINUX_ROOTS)))
+                    else:
+                        self.kobodir = found
 
             # desktop versions use Kobo.sqlite
             kobodb = os.path.join(self.kobodir, "Kobo.sqlite")
