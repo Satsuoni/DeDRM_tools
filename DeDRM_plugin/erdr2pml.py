@@ -319,7 +319,7 @@ class EreaderProcessor(object):
 
         # now handle footnotes pages
         if self.num_footnote_pages > 0:
-            r += '\n'
+            r += b'\n'
             # the record 0 of the footnote section must pass through the Xor Table to make it useful
             sect = self.section_reader(self.first_footnote_page)
             fnote_ids = deXOR(sect, 0, self.xortable)
@@ -327,11 +327,11 @@ class EreaderProcessor(object):
             des = DES.new(fixKey(self.content_key), DES.MODE_ECB)
             for i in range(1,self.num_footnote_pages):
                 logging.debug('get footnotepage %d', i)
-                id_len = ord(fnote_ids[2])
+                id_len = fnote_ids[2]
                 id = fnote_ids[3:3+id_len]
-                fmarker = '<footnote id="%s">\n' % id
+                fmarker = b'<footnote id="' + id + b'">\n'
                 fmarker += zlib.decompress(des.decrypt(self.section_reader(self.first_footnote_page + i)))
-                fmarker += '\n</footnote>\n'
+                fmarker += b'\n</footnote>\n'
                 r += fmarker
                 fnote_ids = fnote_ids[id_len+4:]
 
@@ -343,18 +343,18 @@ class EreaderProcessor(object):
 
         # now handle sidebar pages
         if self.num_sidebar_pages > 0:
-            r += '\n'
+            r += b'\n'
             # the record 0 of the sidebar section must pass through the Xor Table to make it useful
             sect = self.section_reader(self.first_sidebar_page)
             sbar_ids = deXOR(sect, 0, self.xortable)
             # the remaining records of the sidebar sections need to be decoded with the content_key and zlib inflated
             des = DES.new(fixKey(self.content_key), DES.MODE_ECB)
             for i in range(1,self.num_sidebar_pages):
-                id_len = ord(sbar_ids[2])
+                id_len = sbar_ids[2]
                 id = sbar_ids[3:3+id_len]
-                smarker = '<sidebar id="%s">\n' % id
+                smarker = b'<sidebar id="' + id + b'">\n'
                 smarker += zlib.decompress(des.decrypt(self.section_reader(self.first_sidebar_page + i)))
-                smarker += '\n</sidebar>\n'
+                smarker += b'\n</sidebar>\n'
                 r += smarker
                 sbar_ids = sbar_ids[id_len+4:]
 
