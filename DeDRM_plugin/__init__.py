@@ -457,9 +457,9 @@ class DeDRM(FileTypePlugin):
                                 print("{0} v{1}: Saving a new default key".format(PLUGIN_NAME, PLUGIN_VERSION))
                                 try:
                                     if userkey in defaultkeys_ade:
-                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','ade_passhash_'+str(int(time.time())),keyvalue)
+                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','ade_passhash_'+str(int(time.time())),userkey)
                                     else:
-                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','nook_key_'+str(int(time.time())),keyvalue)
+                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','nook_key_'+str(int(time.time())),userkey)
                                     dedrmprefs.writeprefs()
                                     print("{0} v{1}: Saved a new default key after {2:.1f} seconds".format(PLUGIN_NAME, PLUGIN_VERSION,time.time()-self.starttime))
                                 except:
