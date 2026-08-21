@@ -36,20 +36,20 @@ def readEncodedNumber(file):
     c = file.read(1)
     if (len(c) == 0):
         return None
-    data = ord(c)
+    data = c[0]
     if data == 0xFF:
         flag = True
         c = file.read(1)
         if (len(c) == 0):
             return None
-        data = ord(c)
+        data = c[0]
     if data >= 0x80:
         datax = (data & 0x7F)
         while data >= 0x80 :
             c = file.read(1)
             if (len(c) == 0):
                 return None
-            data = ord(c)
+            data = c[0]
             datax = (datax <<7) + (data & 0x7F)
         data = datax
     if flag:
