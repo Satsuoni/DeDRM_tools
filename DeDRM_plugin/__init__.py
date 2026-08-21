@@ -818,6 +818,10 @@ class DeDRM(FileTypePlugin):
 
             print("{0} v{1}: Failed to decrypt with key {2:s} after {3:.1f} seconds".format(PLUGIN_NAME, PLUGIN_VERSION,keyname,time.time()-self.starttime))
 
+        # No configured Adobe key could decrypt this PDF. Raise, rather than
+        # returning None, so calibre reports the failure instead of importing junk.
+        raise DeDRMError("{0} v{1}: Ultimately failed to decrypt after {2:.1f} seconds. Read the FAQs at noDRM's repository: https://github.com/noDRM/DeDRM_tools/blob/master/FAQs.md".format(PLUGIN_NAME, PLUGIN_VERSION, time.time()-self.starttime))
+
     def PDFStandardDecrypt(self, path_to_ebook):
         # Sub function to prevent PDFDecrypt from becoming too large ...
         import prefs
@@ -863,6 +867,7 @@ class DeDRM(FileTypePlugin):
                 return of.name
         
         print("{0} v{1}: Didn't manage to decrypt PDF. Make sure the correct password is entered in the settings.".format(PLUGIN_NAME, PLUGIN_VERSION))
+        raise DeDRMError("{0} v{1}: Ultimately failed to decrypt after {2:.1f} seconds. Read the FAQs at noDRM's repository: https://github.com/noDRM/DeDRM_tools/blob/master/FAQs.md".format(PLUGIN_NAME, PLUGIN_VERSION, time.time()-self.starttime))
 
         
     
