@@ -430,7 +430,7 @@ class BinaryIonParser(object):
         # Convert variably sized network order integer into 64-bit little endian
         j = 0
         vb = [0] * 8
-        for i in range(len(b), -1, -1):
+        for i in range(len(b) - 1, -1, -1):
             vb[i] = b[j]
             j += 1
 
