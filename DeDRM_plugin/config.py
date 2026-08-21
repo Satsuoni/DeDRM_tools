@@ -1214,6 +1214,14 @@ class AddAdeptDialog():
     # Emulate enough methods and parameters so that that works ...
 
     def exec_(self):
+        if len(self.k_full_key_list) == 0:
+            # The wrapper only reports added/duplicate counts, so without this
+            # the user would get no feedback at all when nothing was found.
+            info_dialog(None, "{0} {1}".format(PLUGIN_NAME, PLUGIN_VERSION),
+                "No new Adobe Digital Editions keys found.\n"
+                "Either no ADE / DeACSM activation exists on this machine, "
+                "or all of its keys have already been imported.",
+                show=True, show_copy_button=False)
         return
 
     def result(self): 
@@ -1293,16 +1301,9 @@ class AddAdeptDialog():
         self.k_full_key_list = new_keys_2
         self.k_full_name_list = new_names_2
 
+    # Keys are always handed back through k_key_list / k_name_list below, so the
+    # single-key key_name / key_value properties are intentionally not provided.
 
-    @property
-    def key_name(self):
-        return str(self.key_ledit.text()).strip()
-
-    @property
-    def key_value(self):
-        return codecs.encode(self.new_keys[0],'hex').decode("latin-1")
-
-    
     @property
     def k_name_list(self):
         # If the plugin supports returning multiple keys, return a list of names.
