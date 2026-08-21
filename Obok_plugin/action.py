@@ -2,12 +2,23 @@
 # -*- coding: utf-8 -*-
 # vim:fileencoding=UTF-8:ts=4:sw=4:sta:et:sts=4:ai
 
-_license__   = 'GPL v3'
+__license__  = 'GPL v3'
 __docformat__ = 'restructuredtext en'
 
 
 import codecs
 import os, traceback, zipfile
+
+
+def redact_key(key):
+    """Short, non-recoverable description of a key for log output.
+
+    Logs end up pasted into bug reports, so never print a full key.
+
+    :param key: bytes
+    :return: str such as '0123abcd... (16 bytes)'
+    """
+    return "{0}... ({1} bytes)".format(codecs.encode(key[:4], 'hex').decode('ascii'), len(key))
 
 try:
     from PyQt5.Qt import QToolButton, QUrl
@@ -114,7 +125,7 @@ class InterfacePluginAction(InterfaceAction):
         # Check to see if a key can be retrieved using the legacy obok method.
         legacy_key = legacy_obok().get_legacy_cookie_id
         if legacy_key is not None:
-            print (_('Legacy key found: '), legacy_key.encode('hex_codec'))
+            print (_('Legacy key found: '), redact_key(legacy_key))
             self.userkeys.append(legacy_key)
         # Add userkeys found through the normal obok method to the list to try.
         try:
@@ -381,7 +392,7 @@ class InterfacePluginAction(InterfaceAction):
             return result
         #print ('Kobo library filename: {0}'.format(book.filename))
         for userkey in self.userkeys:
-            print (_('Trying key: '), codecs.encode(userkey, 'hex'))
+            print (_('Trying key: '), redact_key(userkey))
             try:
                 fileout = PersistentTemporaryFile('.epub', dir=self.tdir)
                 #print ('Temp file: {0}'.format(fileout.name))
