@@ -209,7 +209,7 @@ def decryptBook(infile, outdir, kDatabaseFiles, androidFiles, serials, pids):
     try:
         book = GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime)
     except Exception as e:
-        print("Error decrypting book after {1:.1f} seconds: {0}".format(e.args[0],time.time()-starttime))
+        print("Error decrypting book after {1:.1f} seconds: {0}".format(str(e),time.time()-starttime))
         traceback.print_exc()
         return 1
 

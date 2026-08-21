@@ -92,7 +92,7 @@ def WineGetKeys(scriptpath, extension, wineprefix=""):
     try:
         result = pyexec.check_call([scriptpath, outdirpath])
     except Exception as e:
-        print("{0} v{1}: Wine subprocess call error: {2}".format(PLUGIN_NAME, PLUGIN_VERSION, e.args[0]))
+        print("{0} v{1}: Wine subprocess call error: {2}".format(PLUGIN_NAME, PLUGIN_VERSION, str(e)))
 
     # try finding winekeys anyway, even if above code errored
     winekeys = []

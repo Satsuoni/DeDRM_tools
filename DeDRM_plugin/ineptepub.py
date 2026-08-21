@@ -446,7 +446,7 @@ def gui_main():
             try:
                 decrypt_status = decryptBook(userkey, inpath, outpath)
             except Exception as e:
-                self.status['text'] = "Error: {0}".format(e.args[0])
+                self.status['text'] = "Error: {0}".format(str(e))
                 return
             if decrypt_status == 0:
                 self.status['text'] = "File successfully decrypted"

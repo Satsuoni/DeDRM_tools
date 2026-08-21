@@ -256,7 +256,7 @@ class MobiBook:
                     # print type, size, content, content.encode('hex')
                     pos += size
         except Exception as e:
-            print("Cannot set meta_array: Error: {:s}".format(e.args[0]))
+            print("Cannot set meta_array: Error: {}".format(str(e)))
 
     #returns unicode
     def getBookTitle(self):
@@ -487,7 +487,7 @@ def cli_main():
             stripped_file = getUnencryptedBook(infile, pidlist)
             open(outfile, 'wb').write(stripped_file)
         except DrmException as e:
-            print("MobiDeDRM v{0} Error: {1:s}".format(__version__,e.args[0]))
+            print("MobiDeDRM v{0} Error: {1}".format(__version__,str(e)))
             return 1
     return 0
 

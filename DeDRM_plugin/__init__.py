@@ -301,7 +301,7 @@ class DeDRM(FileTypePlugin):
             fr = zipfix.fixZip(path_to_ebook, inf.name)
             fr.fix()
         except Exception as e:
-            print("{0} v{1}: Error \'{2}\' when checking zip archive".format(PLUGIN_NAME, PLUGIN_VERSION, e.args[0]))
+            print("{0} v{1}: Error \'{2}\' when checking zip archive".format(PLUGIN_NAME, PLUGIN_VERSION, str(e)))
             raise
 
         # import the decryption keys
@@ -932,7 +932,7 @@ class DeDRM(FileTypePlugin):
             decoded = False
             # perhaps we need to get a new default Kindle for Mac/PC key
             defaultkeys = []
-            print("{0} v{1}: Failed to decrypt with error: {2}".format(PLUGIN_NAME, PLUGIN_VERSION,e.args[0]))
+            print("{0} v{1}: Failed to decrypt with error: {2}".format(PLUGIN_NAME, PLUGIN_VERSION,str(e)))
 
             traceback.print_exc()
 

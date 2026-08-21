@@ -395,7 +395,7 @@ def gui_main():
                     success = True
                     tkinter.messagebox.showinfo(progname, "Key successfully retrieved to {0}".format(outfile))
             except Exception as e:
-                self.status['text'] = "Error: {0}".format(e.args[0])
+                self.status['text'] = "Error: {0}".format(str(e))
                 return
             self.status['text'] = "Select backup.ab file"
 
