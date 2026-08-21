@@ -55,13 +55,16 @@ def checkForDeACSMkeys():
             # Make a temporary file, have the plugin write to that, then read (& delete) that file.
 
             with TemporaryFile(suffix='.der') as tmp_key_file:
-                export_result = exportAccountEncryptionKeyDER(tmp_key_file)
+                # calibre.ptempfile.TemporaryFile yields the path as a str;
+                # accept a file-like object as well, just in case.
+                tmp_key_path = tmp_key_file if isinstance(tmp_key_file, str) else tmp_key_file.name
+                export_result = exportAccountEncryptionKeyDER(tmp_key_path)
 
                 if (export_result is False): 
                     return None, None
 
                 # Read key file
-                with open(tmp_key_file,'rb') as keyfile:
+                with open(tmp_key_path,'rb') as keyfile:
                     new_key_value = keyfile.read()
 
             return new_key_value, name
