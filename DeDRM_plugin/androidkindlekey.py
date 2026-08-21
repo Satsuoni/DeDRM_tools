@@ -60,7 +60,7 @@ def unpad(data, padding=16):
 
 def pad(data, padding_len=16):
     padding_data_len = padding_len - (len(data) % padding_len)
-    plaintext = data + chr(padding_data_len) * padding_data_len
+    plaintext = data + bytes([padding_data_len]) * padding_data_len
     return plaintext
 
 class AndroidObfuscation(object):
