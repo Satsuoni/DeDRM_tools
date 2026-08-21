@@ -87,7 +87,6 @@ isosx = sys.platform.startswith('darwin')
 
 
 
-import cgi
 import logging
 
 logging.basicConfig()
