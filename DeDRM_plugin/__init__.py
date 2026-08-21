@@ -469,8 +469,7 @@ class DeDRM(FileTypePlugin):
                                 return self.postProcessEPUB(of.name)
 
                             print("{0} v{1}: Failed to decrypt with new default key after {2:.1f} seconds".format(PLUGIN_NAME, PLUGIN_VERSION,time.time()-self.starttime))
-                            return inf.name
-                    
+
                     except:
                         pass
 
