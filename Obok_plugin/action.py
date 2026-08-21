@@ -418,7 +418,6 @@ class InterfacePluginAction(InterfaceAction):
                 print (_('Unknown Error decrypting, trying next key..'))
                 zout.close()
                 continue
-        result['fileobj'] = book.filename
         zin.close()
         return result
 
