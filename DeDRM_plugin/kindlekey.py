@@ -116,6 +116,19 @@ def primes(n):
 
 # Encode the bytes in data with the characters in map
 # data and map should be byte arrays
+def split_offset(contlen):
+    """
+    Offset at which testMap8-encoded content was rotated: the content length
+    minus the largest prime <= contlen/3. Returns 0 (no rotation) when the
+    content is too short to contain such a prime, instead of raising IndexError
+    on a malformed record.
+    :param contlen: int
+    :return: int
+    """
+    plist = primes(int(contlen / 3))
+    return contlen - plist[-1] if plist else 0
+
+
 def encode(data, map):
     result = b''
     for char in data:
@@ -473,7 +486,7 @@ if iswindows:
             encdata = b"".join(edlst)
             #print "encrypted data:",encdata
             contlen = len(encdata)
-            noffset = contlen - primes(int(contlen/3))[-1]
+            noffset = split_offset(contlen)
             pfx = encdata[0:noffset]
             encdata = encdata[noffset:]
             encdata = encdata + pfx
@@ -655,10 +668,13 @@ elif isosx:
             key_iv = PBKDF2(passwdData, salt, count=0x800, dkLen=0x400)
             self.key = key_iv[0:32]
             self.iv = key_iv[32:48]
-            self.crp.set_decrypt_key(self.key, self.iv)
 
         def decrypt(self, encryptedData):
-            cleartext = self.crp.decrypt(encryptedData)
+            # Each record is encrypted independently with the same key/IV, so a
+            # fresh CBC cipher is needed per call (no padding is removed; the
+            # charMap2 decode below simply stops at the first non-map byte).
+            cipher = AES.new(self.key, AES.MODE_CBC, self.iv)
+            cleartext = cipher.decrypt(encryptedData)
             cleartext = decode(cleartext, charMap2)
             return cleartext
 
@@ -851,7 +867,7 @@ elif isosx:
                     # now properly split and recombine
                     # by moving noffset chars from the start of the
                     # string to the end of the string
-                    noffset = contlen - primes(int(contlen/3))[-1]
+                    noffset = split_offset(contlen)
                     pfx = encdata[0:noffset]
                     encdata = encdata[noffset:]
                     encdata = encdata + pfx
