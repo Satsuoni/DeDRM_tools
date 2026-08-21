@@ -4,7 +4,7 @@ __license__   = 'GPL v3'
 __docformat__ = 'restructuredtext en'
 
 import os, sys
-import binascii, hashlib, re, string
+import binascii, hashlib, re
 
 class legacy_obok(object):
     def __init__(self):
@@ -25,7 +25,7 @@ class legacy_obok(object):
     
     def plist_to_dictionary(self, filename):
         from subprocess import Popen, PIPE
-        from plistlib import readPlistFromString
+        from plistlib import loads as plist_loads
         'Pipe the binary plist through plutil and parse the xml output'
         with open(filename, 'rb') as f:
             content = f.read()
@@ -33,7 +33,7 @@ class legacy_obok(object):
         p = Popen(args, stdin=PIPE, stdout=PIPE)
         p.stdin.write(content)
         out, err = p.communicate()
-        return readPlistFromString(out)
+        return plist_loads(out)
     
     def __oldcookiedeviceid(self):
         '''Optionally attempt to get a device id using the old cookie method.
@@ -63,8 +63,8 @@ class legacy_obok(object):
                     pwsdid = pwsdidcheck.group(1)
             if (wsuid == '' or pwsdid == ''):
                 return None
-            preuserkey = string.join((pwsdid, wsuid), '')
-            userkey = hashlib.sha256(preuserkey).hexdigest()
+            preuserkey = ''.join((pwsdid, wsuid))
+            userkey = hashlib.sha256(preuserkey.encode('utf-8')).hexdigest()
             return binascii.a2b_hex(userkey[32:])
         except KeyError:
             print ('No "cookies" key found in Kobo plist: no legacy user key found.')
