@@ -6,19 +6,7 @@ __license__  = 'GPL v3'
 __docformat__ = 'restructuredtext en'
 
 
-import codecs
 import os, traceback, zipfile
-
-
-def redact_key(key):
-    """Short, non-recoverable description of a key for log output.
-
-    Logs end up pasted into bug reports, so never print a full key.
-
-    :param key: bytes
-    :return: str such as '0123abcd... (16 bytes)'
-    """
-    return "{0}... ({1} bytes)".format(codecs.encode(key[:4], 'hex').decode('ascii'), len(key))
 
 try:
     from PyQt5.Qt import QToolButton, QUrl
@@ -43,7 +31,7 @@ from calibre_plugins.obok_dedrm.utilities import (
                             debug_print
                             )
 
-from calibre_plugins.obok_dedrm.obok.obok import KoboLibrary
+from calibre_plugins.obok_dedrm.obok.obok import KoboLibrary, redact_key
 from calibre_plugins.obok_dedrm.obok.legacy_obok import legacy_obok
 
 PLUGIN_ICONS = ['images/obok.png']

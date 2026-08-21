@@ -213,6 +213,16 @@ KOBO_HASH_KEYS = ['88b3a2e13', 'XzUhGYdFp', 'NoCanLook','QJhwzAtXL']
 class ENCRYPTIONError(Exception):
     pass
 
+def redact_key(key):
+    """Short, non-recoverable description of a key for log output.
+
+    Logs end up pasted into bug reports, so never print a full key.
+
+    :param key: bytes
+    :return: str such as '00010203... (16 bytes)'
+    """
+    return "{0}... ({1} bytes)".format(binascii.hexlify(bytes(key[:4])).decode('ascii'), len(key))
+
 # Wrap a stream so that output gets flushed immediately
 # and also make sure that any unicode strings get
 # encoded using "replace" before writing them.
