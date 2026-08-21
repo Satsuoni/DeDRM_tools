@@ -1634,11 +1634,10 @@ class PDFDocument(object):
     def initialize_ebx_ignoble(self, keyb64, docid, param):
         self.is_printable = self.is_modifiable = self.is_extractable = True
 
-        try: 
-            key = keyb64.decode('base64')[:16]
-            # This will probably always error, but I'm not 100% sure, so lets leave the old code in.
-        except AttributeError: 
-            key = codecs.decode(keyb64.encode("ascii"), 'base64')[:16]
+        # The key may arrive as str (from prefs) or bytes (from the passhash dialog).
+        if isinstance(keyb64, str):
+            keyb64 = keyb64.encode('ascii')
+        key = base64.b64decode(keyb64)[:16]
 
 
         length = int_value(param.get('Length', 0)) / 8
