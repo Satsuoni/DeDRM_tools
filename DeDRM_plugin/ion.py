@@ -422,7 +422,7 @@ class BinaryIonParser(object):
         _assert(self.localremaining <= 8, "Decimal overflow")
 
         signed = False
-        b = [ord(x) for x in self.read(self.localremaining)]
+        b = list(self.read(self.localremaining))
         if (b[0] & 0x80) != 0:
             b[0] = b[0] & 0x7F
             signed = True
@@ -659,7 +659,7 @@ class BinaryIonParser(object):
 
         result = ""
         for i in b:
-            result += ("%02x " % ord(i))
+            result += ("%02x " % i)
 
         if len(result) > 0:
             result = result[:-1]
