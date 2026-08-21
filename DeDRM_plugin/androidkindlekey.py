@@ -127,10 +127,11 @@ def get_serials1(path=STORAGE1):
         obfuscation = AndroidObfuscation()
 
     def get_value(key):
-        encrypted_key = obfuscation.encrypt(key)
+        # encrypt() yields hex bytes; the XML keys/values are str
+        encrypted_key = obfuscation.encrypt(key).decode('ascii')
         encrypted_value = storage.get(encrypted_key)
         if encrypted_value:
-            return obfuscation.decrypt(encrypted_value)
+            return obfuscation.decrypt(encrypted_value).decode('utf-8', 'replace')
         return ''
 
     # also see getK4Pids in kgenpids.py
