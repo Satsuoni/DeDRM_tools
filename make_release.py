@@ -22,8 +22,8 @@ KRFTool="Other_Tools/KRFKeyExtractor/KRFKeyExtractor.exe"
 KRFTool28="Other_Tools/KRFKeyExtractor/KFXKeyExtractor28.exe"
 KRFTool282="Other_Tools/KRFKeyExtractor/KFXKeyExtractor282.exe"
 KFXArchiverTool291="Other_Tools/KRFKeyExtractor/KFXArchiver291.exe"
-MSIXArchiverTool="Other_Tools/KRFKeyExtractor/MSIXKFXArchiverMobi1_23620.exe"
-
+MSIXArchiverTool="Other_Tools/KRFKeyExtractor/MSIXKFXArchiver1_23620_final.exe"
+MSIXArchiverTool64="Other_Tools/KRFKeyExtractor/MSIXKFXArchiver_x64_1_25218.exe"
 KRFFrida="Other_Tools/KRFKeyExtractor/kindleFridaInstr.py"
 KRFFridaDecr="Other_Tools/KRFKeyExtractor/kindleFridaDecrypt.py"
 KRFFrida86="Other_Tools/KRFKeyExtractor/kindledecr_x84_64"
@@ -106,6 +106,10 @@ def make_release(version):
         pass    
     try:
         shutil.copy(MSIXArchiverTool, RELEASE_DIR)
+    except:
+        pass    
+    try:
+        shutil.copy(MSIXArchiverTool64, RELEASE_DIR)
     except:
         pass    
     try:
