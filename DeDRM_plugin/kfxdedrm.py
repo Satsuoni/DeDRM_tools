@@ -19,7 +19,8 @@ from io import BytesIO
 #@@CALIBRE_COMPAT_CODE@@
 
 
-from ion import DrmIon, DrmIonVoucher, SKeyList
+from ion import DrmIon, DrmIonVoucher, SKeyList, NEW_KEY_DERIVATION_VERSIONS, unwrap_account_secret
+import kindlekey
 
 
 
@@ -28,8 +29,10 @@ __version__ = '2.0'
 
 
 class KFXZipBook:
-    def __init__(self, infile,skeyfile=None):
+    def __init__(self, infile,skeyfile=None,serials=None):
         self.infile = infile
+        # A snapshot: the caller goes on to extend its serial list with Android dbs.
+        self.serials = list(serials or [])
         if skeyfile is not None:
           self.skeylist=SKeyList(skeyfile)
         else:
@@ -58,6 +61,52 @@ class KFXZipBook:
         if not self.decrypted:
             print("The .kfx-zip archive does not contain an encrypted DRMION file")
 
+    def check_version_needs_account_secret(self, data):
+        """Whether the voucher in this archive derives its key from the account secret.
+
+        Returns None when the envelope cannot be read at all, so a caller can tell a
+        voucher this build does not understand from one that does not need the secret.
+        """
+        try:
+            voucher = DrmIonVoucher(BytesIO(data), '', '', self.skeylist)
+            voucher.parse()
+        except Exception as ex:
+            print("Could not read the KFX voucher envelope: {0}: {1}".format(type(ex).__name__, ex))
+            return None
+        return voucher.version in NEW_KEY_DERIVATION_VERSIONS
+
+    def account_secret_pids(self):
+        """PIDs built from the account secret, for voucher versions that need it.
+
+        A voucher keyed on the account secret is derived from the device serial followed
+        by the secret, which is the PID shape the caller's split loop expects.
+
+        The secret is read from a connected Kindle: acsr holds it wrapped, and
+        account_secret holds it plain. Problems with the files are reported here; a total
+        absence is not, because the caller reports that together with the other
+        prerequisites.
+        """
+        secrets = []
+        for name in ('acsr', 'account_secret'):
+            value = kindlekey.get_device_setting(name)
+            if not value:
+                continue
+            try:
+                if name == 'acsr':
+                    value = unwrap_account_secret(value)
+            except Exception as ex:
+                print("Could not read the {0} file on the device: {1}".format(name, ex))
+                continue
+            if isinstance(value, bytes):
+                value = value.decode('ASCII')
+            if len(value) != 40:
+                print("The {0} file on the device does not hold a 40 character account "
+                      "secret (it is {1} characters).".format(name, len(value)))
+                continue
+            secrets.append(value)
+        return [serial + secret
+                for serial in self.serials for secret in secrets]
+
     def decrypt_voucher(self, totalpids):
         with zipfile.ZipFile(self.infile, 'r') as zf:
             for info in zf.infolist():
@@ -76,7 +125,17 @@ class KFXZipBook:
                 return
         print("Decrypting KFX DRM voucher: {0}".format(info.filename))
 
-        for pid in [''] + totalpids:
+        # Voucher versions from 10001 on need the account secret and the device serial
+        # rather than a serial-derived PID. A serial-derived PID on its own cannot
+        # decrypt one of these, so the account secret pair is tried first rather than
+        # only when nothing else was supplied.
+        needs_secret = self.check_version_needs_account_secret(data)
+        secret_pids = self.account_secret_pids() if needs_secret else []
+        pids = secret_pids + [''] + totalpids
+
+        voucher = None
+        lastexception = None
+        for pid in pids:
             # Belt and braces. PIDs should be unicode strings, but just in case...
             if isinstance(pid, bytes):
                 pid = pid.decode('ascii')
@@ -87,16 +146,35 @@ class KFXZipBook:
                 continue
 
             try:
-                voucher = DrmIonVoucher(BytesIO(data), pid[:dsn_len], pid[dsn_len:],self.skeylist)
-                voucher.parse()
-                voucher.decryptvoucher()
-                break
-            except:
-                traceback.print_exc()
-                pass
-        else:
-            print("Failed to decrypt KFX DRM voucher with any key... Hoping that keylist has a book key. ")
-            self.voucher = voucher
+                candidate = DrmIonVoucher(BytesIO(data), pid[:dsn_len], pid[dsn_len:],self.skeylist,
+                                          quiet=True)
+                candidate.parse()
+                candidate.decryptvoucher()
+            except Exception as ex:
+                # A wrong candidate. The reason is kept so that a total failure can
+                # report why the last attempt did not work.
+                lastexception = ex
+                continue
+            voucher = candidate
+            break
+
+        if voucher is None:
+            self.voucher = None
+            if needs_secret is None:
+                print("The KFX DRM voucher could not be read at all.")
+            elif needs_secret and not secret_pids:
+                print("This KFX DRM voucher is keyed on the device account secret, which "
+                      "is not available. It needs the Kindle's serial number in the "
+                      "plugin's settings, and its acsr file in a de-drm-secrets folder on "
+                      "the mounted Kindle; see Other_Tools/Kindle_Account_Secret/ for how "
+                      "to get that file.")
+            else:
+                print("Failed to decrypt the KFX DRM voucher with any key.")
+                if lastexception is not None:
+                    print("The last key tried was rejected: {0}: {1}".format(
+                        type(lastexception).__name__, lastexception))
+                print("Check that the serial number and account secret belong to the device "
+                      "this book was downloaded for.")
             return
 
         print("KFX DRM voucher successfully decrypted")
