@@ -17,8 +17,10 @@ Copyright © 2013-2020 Apprentice Harper et al.
 """
 
 import collections
+import base64
 import hashlib
 import hmac
+import math
 import os
 import os.path
 import struct
@@ -774,8 +776,10 @@ def pkcs7unpad(msg, blocklen):
 
 
 
-# every VoucherEnvelope version has a corresponding "word" and magic number, used in obfuscating the shared secret
-# 4-digit versions use their own obfuscation/scramble. It does not seem to depend on the "word" and number
+# The versions below all come from one table, but "every version has a word" is wrong: it covers
+# 2..28, 9708, 1031, 2069, 9041, 3646, 6052, 9479, 9888, 4648 and 5683 only.  There is no entry for
+# 10001 and up -- or for 7384, 2746 and 3332 -- so a voucher version absent from this table gets no
+# obfuscation at all.  See tools/kindle-re/README.md for the emulated lookup that shows this.
 OBFUSCATION_TABLE = {
     "V1":    (0x00, None),
     "V2":    (0x05, b'Antidisestablishmentarianism'),
@@ -1300,6 +1304,248 @@ def obfuscate3(secret, version):
         obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
     return obfuscated
 
+# VoucherEnvelope versions from 10001 on do not derive the voucher key by permuting the
+# shared secret string. They hand the lock parameter values to a routine that returns both
+# the HMAC key and the message, and for those versions the message is no longer the
+# constant b"PIDv3" that the versions below use. The boundary here is the ION symbol range
+# this plugin already accepts, not a verified property of every version in it.
+NEW_KEY_DERIVATION_VERSIONS = range(10001, 11111)
+
+# The message builder reads the account secret, the client id and these fixed strings as
+# one run of bytes, then maps each byte to MESSAGE_MULTIPLIERS[byte % 10] * byte. The key
+# builder reads the account secret and the client id alone, with no fixed padding.
+MESSAGE_PREFIX = b"hsrevf43is ds_"
+MESSAGE_SUFFIX = b"-89kndeh83n303"
+MESSAGE_ALPHABET = ".e7G270E7VaO8098SaAm8062wmmAm1SFOMAy"
+MESSAGE_MULTIPLIERS = [28, 88, 28, 100, 35, 118, 271, 231, 184, 240,
+                       40, 120, 105, 132, 290, 52, 60, 31, 171, 49]
+
+# The device keeps the ACCOUNT_SECRET for its own DRM key derivation wrapped under this
+# key, in a file called acsr. The wrapping key is a firmware constant, not per-device.
+ACSR_WRAP_KEY = b"e35f5062f97cc8b1244f6f1a2414e31c"
+
+
+def unwrap_account_secret(acsr):
+    """Recover the ACCOUNT_SECRET from the device's acsr file contents.
+
+    acsr is base64 of base64 of a 16 byte IV followed by the AES-CBC ciphertext. Returns
+    the account secret as bytes, ready to be passed to DrmIonVoucher as the secret.
+    """
+    if isinstance(acsr, str):
+        acsr = acsr.encode('ASCII')
+    inner = _b64decode_field(acsr)
+    wrapped = _b64decode_field(inner)
+    _assert(len(wrapped) > 16 and len(wrapped) % 16 == 0,
+            "acsr does not hold an IV and a whole number of cipher blocks")
+    aes = AES.new(ACSR_WRAP_KEY, AES.MODE_CBC, wrapped[:16])
+    return pkcs7unpad(aes.decrypt(wrapped[16:]), 16)
+
+
+def _b64decode_field(value):
+    """Decode a whole base64 field, ignoring only surrounding whitespace.
+
+    Unlike _b64decode_whole_groups() this keeps the padding, because these fields stand
+    alone rather than being a prefix of a longer string.
+    """
+    return base64.b64decode(b''.join(value.split()))
+
+# The key builder flattens the same wrapped lock parameter values into a vector of
+# ((byte << k) ^ 9) % 500, then walks the distinct values in ascending order as moduli.
+FLATTEN_XOR = 9
+FLATTEN_ROWS = 9
+FACTOR_E = (2, 3, 5, 7)
+
+
+def obfuscate4(lockparamvalues, version):
+    """HMAC key for a VoucherEnvelope version in NEW_KEY_DERIVATION_VERSIONS.
+
+    Unlike obfuscate()/obfuscate2()/obfuscate3(), which permute one shared secret string,
+    these versions read the lock parameter values themselves, so the result's length
+    depends on the bytes of the ACCOUNT_SECRET and CLIENT_ID values rather than only on
+    the length of the shared string.
+
+    lockparamvalues maps the lock parameter name to its value as bytes: ACCOUNT_SECRET is
+    the account secret and CLIENT_ID the device serial. The account secret is base64
+    decoded, because the device is handed the encoded account secret rather than the
+    bytes it unwraps to. version selects the derivation, and is unused here because
+    versions in this range share one.
+    """
+    body = _key_body(_decode_account_secret(lockparamvalues["ACCOUNT_SECRET"]),
+                     lockparamvalues["CLIENT_ID"])
+    runs = _modulus_runs(body)
+
+    out = bytearray()
+    accumulator = []
+    previous = 0
+    for index, (modulus, rounds) in enumerate(runs):
+        # k carries over from the previous modulus. A scan at k == 1 can only return the
+        # modulus itself, so the first scan the device performs is the one at k == 2.
+        for factor in _factors(modulus, 2 if previous == 0 else previous):
+            accumulator.append(factor)
+            out.append(factor & 0xFF)
+        # The last round of the last modulus only reaches the loop exit, and every last
+        # round into a new modulus emits under that new modulus.
+        last = index == len(runs) - 1
+        following = modulus if last else runs[index + 1][0]
+        for round_index in range(rounds - 1 if last else rounds):
+            emit_modulus = following if round_index == rounds - 1 else modulus
+            for i, value in enumerate(accumulator):
+                out.append(((value * (emit_modulus + 1)) & 0xFFFF ^ (emit_modulus ^ i)) & 0xFF)
+        previous = modulus
+    return bytes(out)
+
+
+def _modulus_runs(body):
+    """The distinct flatten values ascending, each with its multiplicity."""
+    runs = []
+    for value in sorted(_flatten(body)):
+        if runs and runs[-1][0] == value:
+            runs[-1][1] += 1
+        else:
+            runs.append([value, 1])
+    return [tuple(run) for run in runs]
+
+
+def _flatten(body):
+    """((byte << k) ^ 9) % 500 for k in 0..8, over every byte of the body."""
+    return [((byte << k) ^ FLATTEN_XOR) % 500
+            for k in range(FLATTEN_ROWS) for byte in body]
+
+
+def _factors(modulus, first_k):
+    """The factors a modulus contributes, in the order the device accepts them.
+
+    For each k ascending the device keeps the largest e with k^2 == e^2 (mod modulus)
+    that yields a factor above one, and each distinct factor is accepted once per scan.
+    """
+    accepted = []
+    for k in range(first_k, modulus):
+        candidates = [(e, math.gcd(k - e, modulus)) for e in FACTOR_E
+                      if (k * k - e * e) % modulus == 0]
+        candidates = [(e, factor) for e, factor in candidates if factor > 1]
+        if not candidates:
+            continue
+        factor = candidates[-1][1]
+        if factor not in accepted:
+            accepted.append(factor)
+    return accepted
+
+
+def message4(lockparamvalues, version):
+    """HMAC message for a VoucherEnvelope version in NEW_KEY_DERIVATION_VERSIONS.
+
+    Takes the same lockparamvalues argument as obfuscate4(). Returns bytes.
+
+    The message is the concatenation of the decimal renderings of a vector of 32 bit
+    values, in the order a breadth first walk of an implicit binary heap visits them.
+    """
+    body = _message_body(_decode_account_secret(lockparamvalues["ACCOUNT_SECRET"]),
+                         lockparamvalues["CLIENT_ID"])
+    vector = _message_vector(body)
+    order = _heap_walk_order(len(vector))
+    return ''.join(str(vector[i]) for i in order).encode('ASCII')
+
+
+def _decode_account_secret(account_secret):
+    """The account secret as the device's key and message builders receive it, as bytes.
+
+    The acsr file holds the secret base64 encoded, so it is decoded here. The unwrapped
+    account secret is 40 hex characters, which is not base64, so that form is passed
+    through instead; it is what unwrap_account_secret() returns.
+    """
+    if isinstance(account_secret, str):
+        account_secret = account_secret.encode('ASCII')
+    if _is_account_secret(account_secret):
+        return account_secret
+    return _b64decode_whole_groups(account_secret)
+
+
+def _is_account_secret(value):
+    """Whether value is an already unwrapped account secret. value must be bytes.
+
+    The unwrapped secret is always 40 lowercase hex characters, and 40 characters is not
+    a multiple of 4, so it can never be mistaken for the encoded form.
+    """
+    return (len(value) == 40
+            and all(c in b'0123456789abcdef' for c in value))
+
+
+def _key_body(account_secret, client_id):
+    """The bytes the HMAC key is built from: the account secret then the client id."""
+    return account_secret + client_id
+
+
+def _message_body(account_secret, client_id):
+    """The bytes the HMAC message is built from: the key body inside fixed padding."""
+    return MESSAGE_PREFIX + _key_body(account_secret, client_id) + MESSAGE_SUFFIX
+
+
+def _b64decode_whole_groups(value):
+    """Decode the account secret the way the device does.
+
+    The device decodes as many whole 4 character groups as the string holds and ignores
+    any remainder, so a 5 character secret decodes to the same bytes as its first 4.
+    """
+    return base64.b64decode(value[:(len(value) // 4) * 4])
+
+
+def _message_vector(body):
+    """The vector the message is rendered from, given the wrapped lock parameter values."""
+    values = [ord(c) for c in MESSAGE_ALPHABET]
+    values += [MESSAGE_MULTIPLIERS[c % 10] * c for c in body]
+    _shuffle(values)
+    return values + _trickle(values)
+
+
+def _shuffle(values):
+    """Swap each entry with a data dependent partner, in place.
+
+    Position k is swapped values[k] % 10 times, re-read after every swap, and the partner
+    is (k << (n % 3)) % len(values) for the decreasing counter n.
+    """
+    length = len(values)
+    for k in range(length):
+        n = values[k] % 10
+        while n:
+            j = (k << (n % 3)) % length
+            values[k], values[j] = values[j], values[k]
+            n -= 1
+
+
+def _trickle(values):
+    """The appended part: a monotonic stack over the vector, emitting differences."""
+    stack = []
+    out = []
+    j = 0
+    while j < len(values):
+        if stack and values[stack[-1]] < values[j]:
+            popped = values[stack.pop()]
+            if stack:
+                top = stack[-1]
+                out.append((min(values[j], values[top]) - popped) * (j - top - 1))
+        else:
+            stack.append(j)
+            j += 1
+    return out
+
+
+def _heap_walk_order(n):
+    """Breadth first walk of an implicit binary heap from its middle, without repeats."""
+    queue = collections.deque([n // 2])
+    seen = [False] * n
+    order = []
+    while queue:
+        i = queue.popleft()
+        if seen[i]:
+            continue
+        seen[i] = True
+        order.append(i)
+        for j in (2 * i + 1, 2 * i + 2, (i - 1) >> 1 if i else -1):
+            if 0 <= j < n and not seen[j]:
+                queue.append(j)
+    return order
+
+
 class SKeyList(object):
     def __init__(self, skeyfile):
       self.keycandidates={}
@@ -1339,8 +1585,11 @@ class DrmIonVoucher(object):
     cipheriv = b""
     secretkey = b""
 
-    def __init__(self, voucherenv, dsn, secret,skeylist=None):
+    def __init__(self, voucherenv, dsn, secret,skeylist=None,quiet=False):
         self.dsn, self.secret = dsn, secret
+        # Set by a caller that tries several PIDs in a row and prints one summary
+        # itself, so that a failure is not reported once per PID.
+        self.quiet = quiet
 
         if isinstance(dsn, str):
             self.dsn = dsn.encode('ASCII')
@@ -1349,6 +1598,7 @@ class DrmIonVoucher(object):
             self.secret = secret.encode('ASCII')
 
         self.lockparams = []
+        self.lockparamvalues = {}
         self.keycandidates=[]
         self.secretkeycandidate=None
         self.skeylist=skeylist
@@ -1361,13 +1611,17 @@ class DrmIonVoucher(object):
 
         self.lockparams.sort()
         print("Lock parameters used: {}".format(self.lockparams))
+        # Rebuilt rather than appended to, so that a second call cannot double the values.
+        self.lockparamvalues = {}
         for param in self.lockparams:
             if param == "ACCOUNT_SECRET":
-                shared += param.encode('ASCII') + self.secret
+                value = self.secret
             elif param == "CLIENT_ID":
-                shared += param.encode('ASCII') + self.dsn
+                value = self.dsn
             else:
                 _assert(False, "Unknown lock parameter: %s" % param)
+            shared += param.encode('ASCII') + value
+            self.lockparamvalues[param] = value
 
 
         # i know that version maps to scramble pretty much 1 to 1, but there was precendent where they changed it, so...
@@ -1378,8 +1632,16 @@ class DrmIonVoucher(object):
 
         decrypted=False
         lastexception = None # type: Exception | None
-        keycandidates=self.keycandidates+[hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
-        for key in keycandidates:
+        keycandidates=list(self.keycandidates)
+        keycandidates += [hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
+        if self.version in NEW_KEY_DERIVATION_VERSIONS:
+            # Not one of the shared-secret permutations above: the key and the message both
+            # come from the version's own routine, which reads the lock parameter values
+            # themselves rather than the shared string assembled here.
+            keycandidates.append(hmac.new(obfuscate4(self.lockparamvalues, self.version),
+                                          message4(self.lockparamvalues, self.version),
+                                          digestmod=hashlib.sha256).digest())
+        for index, key in enumerate(keycandidates, 1):
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:
                 b = aes.decrypt(self.ciphertext)
@@ -1391,14 +1653,17 @@ class DrmIonVoucher(object):
                     "Expected KeySet, got %s" % self.drmkey.gettypename())
                 decrypted=True
 
-                print("Decryption succeeded")
+                print("Decryption succeeded with candidate {0} of {1}".format(
+                    index, len(keycandidates)))
                 break
             except Exception as ex:
                 lastexception = ex
-                print("Decryption failed, trying next fallback ")
         if not decrypted:
+            if self.quiet:
+                raise lastexception
+            print("Tried {0} key candidates for voucher version {1}, none of them worked. "
+                  "The last one failed with: {2}".format(len(keycandidates), self.version, lastexception))
             if self.secretkeycandidate is None:
-              print("Failed all decryption attempts and no key candidate available")
               raise lastexception
             else:
                 print("Failed all decryption attempts but we have a key candidate")
@@ -1593,7 +1858,7 @@ class DrmIon(object):
                             ct = self.ion.lobvalue()
                         elif self.ion.getfieldname() == "cipher_iv":
                             civ = self.ion.lobvalue()
-                    _assert(self.key is not None, "Unable to obtain secret key from voucher or keylist")
+                    _assert(self.key is not None and len(self.key) > 0, "Unable to obtain secret key from voucher or keylist")
                     if ct is not None and civ is not None:
                         self.processpage(ct, civ, outpages, decompress, decrypt)
                     self.ion.stepout()
