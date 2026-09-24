@@ -1311,6 +1311,16 @@ def obfuscate3(secret, version):
 # this plugin already accepts, not a verified property of every version in it.
 NEW_KEY_DERIVATION_VERSIONS = range(10001, 11111)
 
+# obfuscate4() and message4() read the lock parameter values and nothing else, so a
+# voucher that declares none of them has nothing for this derivation to read, however new
+# its version is; the Android and some Mac vouchers do exactly that. A voucher may also
+# declare only CLIENT_ID, which is what the 10014 vouchers on Kindles that never received
+# an account secret do: that one has a client id to work from, so it is attempted with an
+# empty secret rather than skipped.
+def needs_new_key_derivation(version, lockparams):
+    """Whether this voucher's key can come from the version-10001+ derivation."""
+    return version in NEW_KEY_DERIVATION_VERSIONS and bool(lockparams)
+
 # The message builder reads the account secret, the client id and these fixed strings as
 # one run of bytes, then maps each byte to MESSAGE_MULTIPLIERS[byte % 10] * byte. The key
 # builder reads the account secret and the client id alone, with no fixed padding.
@@ -1365,13 +1375,15 @@ def obfuscate4(lockparamvalues, version):
     the length of the shared string.
 
     lockparamvalues maps the lock parameter name to its value as bytes: ACCOUNT_SECRET is
-    the account secret and CLIENT_ID the device serial. The account secret is base64
+    the account secret and CLIENT_ID the device serial. Either may be absent, and is read
+    as empty: a voucher can carry a client id with no account secret, which is what the
+    versions on Kindles that were never given one look like. The account secret is base64
     decoded, because the device is handed the encoded account secret rather than the
     bytes it unwraps to. version selects the derivation, and is unused here because
     versions in this range share one.
     """
-    body = _key_body(_decode_account_secret(lockparamvalues["ACCOUNT_SECRET"]),
-                     lockparamvalues["CLIENT_ID"])
+    body = _key_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b"")),
+                     lockparamvalues.get("CLIENT_ID", b""))
     runs = _modulus_runs(body)
 
     out = bytearray()
@@ -1439,8 +1451,8 @@ def message4(lockparamvalues, version):
     The message is the concatenation of the decimal renderings of a vector of 32 bit
     values, in the order a breadth first walk of an implicit binary heap visits them.
     """
-    body = _message_body(_decode_account_secret(lockparamvalues["ACCOUNT_SECRET"]),
-                         lockparamvalues["CLIENT_ID"])
+    body = _message_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b"")),
+                         lockparamvalues.get("CLIENT_ID", b""))
     vector = _message_vector(body)
     order = _heap_walk_order(len(vector))
     return ''.join(str(vector[i]) for i in order).encode('ASCII')
@@ -1634,7 +1646,7 @@ class DrmIonVoucher(object):
         lastexception = None # type: Exception | None
         keycandidates=list(self.keycandidates)
         keycandidates += [hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
-        if self.version in NEW_KEY_DERIVATION_VERSIONS:
+        if needs_new_key_derivation(self.version, self.lockparams):
             # Not one of the shared-secret permutations above: the key and the message both
             # come from the version's own routine, which reads the lock parameter values
             # themselves rather than the shared string assembled here.

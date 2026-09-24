@@ -19,7 +19,8 @@ from io import BytesIO
 #@@CALIBRE_COMPAT_CODE@@
 
 
-from ion import DrmIon, DrmIonVoucher, SKeyList, NEW_KEY_DERIVATION_VERSIONS, unwrap_account_secret
+from ion import (DrmIon, DrmIonVoucher, SKeyList, needs_new_key_derivation,
+                 unwrap_account_secret)
 import kindlekey
 
 
@@ -61,8 +62,14 @@ class KFXZipBook:
         if not self.decrypted:
             print("The .kfx-zip archive does not contain an encrypted DRMION file")
 
-    def check_version_needs_account_secret(self, data):
+    def voucher_needs_account_secret(self, data):
         """Whether the voucher in this archive derives its key from the account secret.
+
+        A new-style version is not enough on its own. The derivation reads the lock
+        parameter values, and a voucher that declares no ACCOUNT_SECRET uses the serial
+        alone, so asking the user for a secret would send them after a credential this
+        voucher never consumes. The 10014 vouchers on Kindles that were never given one
+        are exactly that shape.
 
         Returns None when the envelope cannot be read at all, so a caller can tell a
         voucher this build does not understand from one that does not need the secret.
@@ -73,7 +80,8 @@ class KFXZipBook:
         except Exception as ex:
             print("Could not read the KFX voucher envelope: {0}: {1}".format(type(ex).__name__, ex))
             return None
-        return voucher.version in NEW_KEY_DERIVATION_VERSIONS
+        return ("ACCOUNT_SECRET" in voucher.lockparams
+                and needs_new_key_derivation(voucher.version, voucher.lockparams))
 
     def account_secret_pids(self):
         """PIDs built from the account secret, for voucher versions that need it.
@@ -129,7 +137,7 @@ class KFXZipBook:
         # rather than a serial-derived PID. A serial-derived PID on its own cannot
         # decrypt one of these, so the account secret pair is tried first rather than
         # only when nothing else was supplied.
-        needs_secret = self.check_version_needs_account_secret(data)
+        needs_secret = self.voucher_needs_account_secret(data)
         secret_pids = self.account_secret_pids() if needs_secret else []
         pids = secret_pids + [''] + totalpids
 
