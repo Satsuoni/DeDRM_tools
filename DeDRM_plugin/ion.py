@@ -1330,6 +1330,25 @@ MESSAGE_ALPHABET = ".e7G270E7VaO8098SaAm8062wmmAm1SFOMAy"
 MESSAGE_MULTIPLIERS = [28, 88, 28, 100, 35, 118, 271, 231, 184, 240,
                        40, 120, 105, 132, 290, 52, 60, 31, 171, 49]
 
+# One of the library builds that arrived with the B00 serial vouchers opens its message
+# vector with this run of characters instead. Its prefix, suffix and multiplier table are
+# byte identical to MESSAGE_PREFIX, MESSAGE_SUFFIX and MESSAGE_MULTIPLIERS, so this is
+# the only string that differs; the first 36 entries of the vector the device shuffles
+# are the ords of this run rather than of MESSAGE_ALPHABET.
+MESSAGE_ALPHABET_B = ".eDV5AD_4j.VoAB8H.OmoA35FmmOm1F9dOCx"
+
+# The other two of those three vouchers open their message vector with a run of their own,
+# so the three captures between them disagree on all three of the constants a build fixes
+# and no two share a profile. Both runs below were recovered by inverting message4()'s
+# shuffle and heap walk against the HMAC message the library emitted for its own voucher,
+# and each reproduces that message byte for byte, as MESSAGE_ALPHABET_B does for
+# B00I765ZEU. _shuffle is not one to one in the alphabet once the body is fixed, so what
+# is pinned is a member of the class the capture admits rather than necessarily the run
+# itself; the body is the account secret and the client id, so this is exact for the
+# device these came from and would have to be re-derived for another serial.
+MESSAGE_ALPHABET_C = ".Fe06z2J570N729.kz5z82f63zz5m1jijZ1i"
+MESSAGE_ALPHABET_D = ".e-Jjh0RBjdJhjB1VdDuLj7iAnuDm1T6SECX"
+
 # The device keeps the ACCOUNT_SECRET for its own DRM key derivation wrapped under this
 # key, in a file called acsr. The wrapping key is a firmware constant, not per-device.
 ACSR_WRAP_KEY = b"e35f5062f97cc8b1244f6f1a2414e31c"
@@ -1360,13 +1379,70 @@ def _b64decode_field(value):
     return base64.b64decode(b''.join(value.split()))
 
 # The key builder flattens the same wrapped lock parameter values into a vector of
-# ((byte << k) ^ 9) % 500, then walks the distinct values in ascending order as moduli.
+# ((byte << k) ^ xor) % 500, then walks the distinct values in ascending order as moduli.
+# These are the PW4's xor and row count; which pair a build uses travels in
+# DerivationProfile.
 FLATTEN_XOR = 9
 FLATTEN_ROWS = 9
 FACTOR_E = (2, 3, 5, 7)
 
 
-def obfuscate4(lockparamvalues, version):
+class DerivationProfile(object):
+    """One library build's constants for obfuscate4() and message4().
+
+    A voucher carries its lock parameter values and its version, and says nothing about
+    which build of the SDK produced it, so the properties builds have been observed to
+    disagree on travel together as one profile:
+
+    flatten_xor and flatten_rows shape the key builder's flatten vector,
+    alphabet is the run of characters the message vector opens with, and
+    passthrough_hex_secret says how a 40 character ACCOUNT_SECRET, the form
+    unwrap_account_secret returns, is read: a build either uses it as it stands or
+    base64 decodes it like any other encoded secret, which turns those 40 characters
+    into the 30 bytes they spell.
+
+    The first three are constants a build fixes; the last is the only difference in how
+    an input is read, and it means the same acsr yields a different key under each.
+    """
+
+    def __init__(self, name, flatten_xor, flatten_rows, alphabet, passthrough_hex_secret):
+        self.name = name
+        self.flatten_xor = flatten_xor
+        self.flatten_rows = flatten_rows
+        self.alphabet = alphabet
+        self.passthrough_hex_secret = passthrough_hex_secret
+
+    def __repr__(self):
+        return "DerivationProfile(%r)" % (self.name,)
+
+
+# Every profile below was checked against output captured from the library it describes:
+# "pw4" against the firmware's own HMAC key and message for the real credential, "pr135"
+# against the key and message the library shipped in pr135-files.zip emitted for every
+# lock parameter combination tried against it, and the three named for the voucher each was
+# taken from against that voucher's own key and message. decryptvoucher() offers a
+# candidate built under each, because nothing in the voucher says which library to use.
+#
+# The last three read the 40 character secret unwrap_account_secret returns as it stands,
+# which is the form the plugin holds: under that reading each reproduces the key and the
+# message in its capture. pr135 and b00i765zeu agree on MESSAGE_ALPHABET_B and on the
+# flatten pair and still are not one build: pr135 base64 decodes the secret its own
+# harness handed it, and the capture behind b00i765zeu does not.
+DERIVATION_PROFILES = (
+    DerivationProfile("pw4", FLATTEN_XOR, FLATTEN_ROWS, MESSAGE_ALPHABET, True),
+    DerivationProfile("pr135", 3, 3, MESSAGE_ALPHABET_B, False),
+    DerivationProfile("b00i765zeu", 3, 3, MESSAGE_ALPHABET_B, True),
+    DerivationProfile("b00cvs2j80", 9, 9, MESSAGE_ALPHABET_C, True),
+    DerivationProfile("b00spvpx2g", 1, 1, MESSAGE_ALPHABET_D, True),
+)
+
+
+def _derivation_profile(profile):
+    """The profile to derive under, defaulting to the first one tried."""
+    return DERIVATION_PROFILES[0] if profile is None else profile
+
+
+def obfuscate4(lockparamvalues, version, profile=None):
     """HMAC key for a VoucherEnvelope version in NEW_KEY_DERIVATION_VERSIONS.
 
     Unlike obfuscate()/obfuscate2()/obfuscate3(), which permute one shared secret string,
@@ -1377,14 +1453,16 @@ def obfuscate4(lockparamvalues, version):
     lockparamvalues maps the lock parameter name to its value as bytes: ACCOUNT_SECRET is
     the account secret and CLIENT_ID the device serial. Either may be absent, and is read
     as empty: a voucher can carry a client id with no account secret, which is what the
-    versions on Kindles that were never given one look like. The account secret is base64
-    decoded, because the device is handed the encoded account secret rather than the
-    bytes it unwraps to. version selects the derivation, and is unused here because
-    versions in this range share one.
+    versions on Kindles that were never given one look like. version selects the
+    derivation, and is unused here because versions in this range share one. profile
+    selects the library build to derive under, and defaults to the first of
+    DERIVATION_PROFILES; see DerivationProfile for what differs between them.
     """
-    body = _key_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b"")),
+    profile = _derivation_profile(profile)
+    body = _key_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b""),
+                                            profile),
                      lockparamvalues.get("CLIENT_ID", b""))
-    runs = _modulus_runs(body)
+    runs = _modulus_runs(body, profile)
 
     out = bytearray()
     accumulator = []
@@ -1407,10 +1485,11 @@ def obfuscate4(lockparamvalues, version):
     return bytes(out)
 
 
-def _modulus_runs(body):
+def _modulus_runs(body, profile=None):
     """The distinct flatten values ascending, each with its multiplicity."""
+    profile = _derivation_profile(profile)
     runs = []
-    for value in sorted(_flatten(body)):
+    for value in sorted(_flatten(body, profile)):
         if runs and runs[-1][0] == value:
             runs[-1][1] += 1
         else:
@@ -1418,10 +1497,11 @@ def _modulus_runs(body):
     return [tuple(run) for run in runs]
 
 
-def _flatten(body):
-    """((byte << k) ^ 9) % 500 for k in 0..8, over every byte of the body."""
-    return [((byte << k) ^ FLATTEN_XOR) % 500
-            for k in range(FLATTEN_ROWS) for byte in body]
+def _flatten(body, profile=None):
+    """The profile's flatten of every byte of the body: ((byte << k) ^ xor) % 500."""
+    profile = _derivation_profile(profile)
+    return [((byte << k) ^ profile.flatten_xor) % 500
+            for k in range(profile.flatten_rows) for byte in body]
 
 
 def _factors(modulus, first_k):
@@ -1443,31 +1523,38 @@ def _factors(modulus, first_k):
     return accepted
 
 
-def message4(lockparamvalues, version):
+def message4(lockparamvalues, version, profile=None):
     """HMAC message for a VoucherEnvelope version in NEW_KEY_DERIVATION_VERSIONS.
 
-    Takes the same lockparamvalues argument as obfuscate4(). Returns bytes.
+    Takes the same lockparamvalues argument as obfuscate4(), and the same profile: the
+    message and the key are built under one library build's constants, not one of each.
+    Returns bytes.
 
     The message is the concatenation of the decimal renderings of a vector of 32 bit
     values, in the order a breadth first walk of an implicit binary heap visits them.
     """
-    body = _message_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b"")),
+    profile = _derivation_profile(profile)
+    body = _message_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b""),
+                                                profile),
                          lockparamvalues.get("CLIENT_ID", b""))
-    vector = _message_vector(body)
+    vector = _message_vector(body, profile)
     order = _heap_walk_order(len(vector))
     return ''.join(str(vector[i]) for i in order).encode('ASCII')
 
 
-def _decode_account_secret(account_secret):
+def _decode_account_secret(account_secret, profile=None):
     """The account secret as the device's key and message builders receive it, as bytes.
 
-    The acsr file holds the secret base64 encoded, so it is decoded here. The unwrapped
-    account secret is 40 hex characters, which is not base64, so that form is passed
-    through instead; it is what unwrap_account_secret() returns.
+    The acsr file holds the secret base64 encoded, so it is decoded here. What differs
+    between library builds is the unwrapped form: most of the profiles below use the 40
+    hex characters unwrap_account_secret() returns as they stand, while pr135 base64
+    decodes them like any other encoded secret, which turns those 40 characters into the
+    30 bytes they spell. profile decides which reading applies; see DerivationProfile.
     """
+    profile = _derivation_profile(profile)
     if isinstance(account_secret, str):
         account_secret = account_secret.encode('ASCII')
-    if _is_account_secret(account_secret):
+    if profile.passthrough_hex_secret and _is_account_secret(account_secret):
         return account_secret
     return _b64decode_whole_groups(account_secret)
 
@@ -1475,8 +1562,9 @@ def _decode_account_secret(account_secret):
 def _is_account_secret(value):
     """Whether value is an already unwrapped account secret. value must be bytes.
 
-    The unwrapped secret is always 40 lowercase hex characters, and 40 characters is not
-    a multiple of 4, so it can never be mistaken for the encoded form.
+    The unwrapped secret is 40 lowercase hex characters, and every one of them is also a
+    base64 digit, so this shape alone does not say how the value is to be read: that is
+    what DerivationProfile.passthrough_hex_secret decides.
     """
     return (len(value) == 40
             and all(c in b'0123456789abcdef' for c in value))
@@ -1501,9 +1589,10 @@ def _b64decode_whole_groups(value):
     return base64.b64decode(value[:(len(value) // 4) * 4])
 
 
-def _message_vector(body):
+def _message_vector(body, profile=None):
     """The vector the message is rendered from, given the wrapped lock parameter values."""
-    values = [ord(c) for c in MESSAGE_ALPHABET]
+    profile = _derivation_profile(profile)
+    values = [ord(c) for c in profile.alphabet]
     values += [MESSAGE_MULTIPLIERS[c % 10] * c for c in body]
     _shuffle(values)
     return values + _trickle(values)
@@ -1649,10 +1738,15 @@ class DrmIonVoucher(object):
         if needs_new_key_derivation(self.version, self.lockparams):
             # Not one of the shared-secret permutations above: the key and the message both
             # come from the version's own routine, which reads the lock parameter values
-            # themselves rather than the shared string assembled here.
-            keycandidates.append(hmac.new(obfuscate4(self.lockparamvalues, self.version),
-                                          message4(self.lockparamvalues, self.version),
-                                          digestmod=hashlib.sha256).digest())
+            # themselves rather than the shared string assembled here. The voucher does
+            # not say which library build it was made for, so one candidate is built under
+            # each profile and whichever of them decrypts is the right one.
+            for profile in DERIVATION_PROFILES:
+                keycandidates.append(hmac.new(obfuscate4(self.lockparamvalues, self.version,
+                                                         profile),
+                                              message4(self.lockparamvalues, self.version,
+                                                       profile),
+                                              digestmod=hashlib.sha256).digest())
         for index, key in enumerate(keycandidates, 1):
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:
