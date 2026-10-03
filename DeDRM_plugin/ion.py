@@ -1349,6 +1349,24 @@ MESSAGE_ALPHABET_B = ".eDV5AD_4j.VoAB8H.OmoA35FmmOm1F9dOCx"
 MESSAGE_ALPHABET_C = ".Fe06z2J570N729.kz5z82f63zz5m1jijZ1i"
 MESSAGE_ALPHABET_D = ".e-Jjh0RBjdJhjB1VdDuLj7iAnuDm1T6SECX"
 
+# The message vector's opening run is not a constant of a build after all: the library
+# picks its 36 characters out of a 64 character source it builds from the voucher's own
+# id, so what a voucher opens with follows from the voucher rather than from the library
+# that made it. MESSAGE_ALPHABET and its three variants stand in for what that rule
+# builds when a voucher carries no id to build one from; where a run and the rule
+# disagree, the run is a member of the class the inversion admitted rather than the run
+# the library built, which is what the note above says of MESSAGE_ALPHABET_C and
+# MESSAGE_ALPHABET_D.
+#
+# VOUCHER_ID_PREFIX heads every voucher id. SOURCE_SEED is the run the source starts as,
+# permuted by SOURCE_ROUNDS swaps each driven by one byte of the id. MESSAGE_STREAM is a
+# fixed 36 character run of the library's, holding next to the message builder's own
+# fixed strings, whose 18 pairs decide which 36 of the source's positions are read.
+VOUCHER_ID_PREFIX = b"amzn1.drm-voucher.v1."
+SOURCE_SEED = b"0Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh-8Ii9JjKkLlMmNnOoPpQqR_rSsTtUuVvWwXxYyZz"
+SOURCE_ROUNDS = 22
+MESSAGE_STREAM = b"dhbi934l3irje98rjnfne949fdnfankANSDW"
+
 # The device keeps the ACCOUNT_SECRET for its own DRM key derivation wrapped under this
 # key, in a file called acsr. The wrapping key is a firmware constant, not per-device.
 ACSR_WRAP_KEY = b"e35f5062f97cc8b1244f6f1a2414e31c"
@@ -1384,6 +1402,13 @@ def _b64decode_field(value):
 # DerivationProfile.
 FLATTEN_XOR = 9
 FLATTEN_ROWS = 9
+
+# The row count is not fixed per build: captures from one build and one credential, with
+# only the voucher id changed, produce keys of five different lengths, and each length
+# belongs to exactly one (xor, rows) pair in which the two agree and range over these five.
+# The device reads the count out of the voucher id; _voucher_rows() recomputes it, and
+# these are the counts offered when there is no id to read.
+FLATTEN_ROW_CANDIDATES = (1, 3, 5, 7, 9)
 FACTOR_E = (2, 3, 5, 7)
 
 
@@ -1395,14 +1420,18 @@ class DerivationProfile(object):
     disagree on travel together as one profile:
 
     flatten_xor and flatten_rows shape the key builder's flatten vector,
-    alphabet is the run of characters the message vector opens with, and
+    alphabet is the run of characters the message vector opens with when there is no
+    voucher id to build one from, and
     passthrough_hex_secret says how a 40 character ACCOUNT_SECRET, the form
     unwrap_account_secret returns, is read: a build either uses it as it stands or
     base64 decodes it like any other encoded secret, which turns those 40 characters
     into the 30 bytes they spell.
 
-    The first three are constants a build fixes; the last is the only difference in how
-    an input is read, and it means the same acsr yields a different key under each.
+    passthrough_hex_secret is a constant a build fixes; the alphabet is not one of them,
+    and neither is the row count. message4() prefers the run _voucher_alphabet() builds
+    from the voucher's id and reaches for profile.alphabet when the voucher does not carry
+    an id it can read, and decryptvoucher() takes the row count from _voucher_rows() the
+    same way, falling back to every FLATTEN_ROW_CANDIDATES count when there is no id.
     """
 
     def __init__(self, name, flatten_xor, flatten_rows, alphabet, passthrough_hex_secret):
@@ -1523,12 +1552,14 @@ def _factors(modulus, first_k):
     return accepted
 
 
-def message4(lockparamvalues, version, profile=None):
+def message4(lockparamvalues, version, profile=None, voucher_id=None):
     """HMAC message for a VoucherEnvelope version in NEW_KEY_DERIVATION_VERSIONS.
 
     Takes the same lockparamvalues argument as obfuscate4(), and the same profile: the
     message and the key are built under one library build's constants, not one of each.
-    Returns bytes.
+    voucher_id is the envelope's voucher id when the caller has it, and it decides the 36
+    characters the message opens with; profile.alphabet stands in when there is no id to
+    build those characters from. Returns bytes.
 
     The message is the concatenation of the decimal renderings of a vector of 32 bit
     values, in the order a breadth first walk of an implicit binary heap visits them.
@@ -1537,7 +1568,7 @@ def message4(lockparamvalues, version, profile=None):
     body = _message_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b""),
                                                 profile),
                          lockparamvalues.get("CLIENT_ID", b""))
-    vector = _message_vector(body, profile)
+    vector = _message_vector(body, profile, voucher_id)
     order = _heap_walk_order(len(vector))
     return ''.join(str(vector[i]) for i in order).encode('ASCII')
 
@@ -1589,10 +1620,118 @@ def _b64decode_whole_groups(value):
     return base64.b64decode(value[:(len(value) // 4) * 4])
 
 
-def _message_vector(body, profile=None):
+def _voucher_alphabet(voucher_id):
+    """The 36 characters the message vector opens with for this voucher, or None.
+
+    voucher_id is the envelope's voucher id, the string VOUCHER_ID_PREFIX heads. An id
+    of any other shape builds nothing, so None tells the caller to fall back to the run
+    the profile carries.
+    """
+    if isinstance(voucher_id, str):
+        voucher_id = voucher_id.encode('ASCII')
+    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+        return None
+    source = _voucher_source(voucher_id)
+    return bytes(source[i] for i in _message_picks(source)).decode('ASCII')
+
+
+def _voucher_rows(voucher_id):
+    """The row count the key builder flattens over, read out of the voucher id, or None.
+
+    The device starts an accumulator at ten and folds every character of the id through
+    acc = ((c << (c & 1)) ^ acc) % 10, replacing a zero with three; the result is the count.
+    An id of any other shape reads no count, so None tells the caller to fall back to the
+    counts FLATTEN_ROW_CANDIDATES names.
+    """
+    if isinstance(voucher_id, str):
+        voucher_id = voucher_id.encode('ASCII')
+    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+        return None
+    acc = 10
+    for byte in voucher_id:
+        acc = ((byte << (byte & 1)) ^ acc) % 10
+        if acc == 0:
+            acc = 3
+    return acc
+
+
+def _voucher_source(voucher_id):
+    """The 64 character run the message vector's opening 36 are picked out of.
+
+    SOURCE_SEED is swapped SOURCE_ROUNDS times, each swap driven by the next byte of the
+    id and the byte of the seed it lands on. The id's characters in first appearance
+    order are then written in front of the seed's characters the id does not hold, and
+    the run is cut back to the seed's length.
+    """
+    seed = bytearray(SOURCE_SEED)
+    acc = 1
+    for k in range(SOURCE_ROUNDS):
+        i = 3 * k
+        acc ^= voucher_id[i % len(voucher_id)] ^ seed[i]
+        j = (i ^ acc) & 0x3f
+        seed[i], seed[j] = seed[j], seed[i]
+    head = []
+    seen = set()
+    for byte in voucher_id:
+        if byte not in seen:
+            seen.add(byte)
+            head.append(byte)
+    tail = [byte for byte in seed if byte not in seen]
+    return bytes((head + tail)[:len(SOURCE_SEED)])
+
+
+def _message_picks(source):
+    """The 36 positions in source the message vector's opening run reads, in order.
+
+    source is read as an 8 by 8 grid. MESSAGE_STREAM holds 18 character pairs, and for
+    each pair the library walks the grid in row order until it has met both of the pair's
+    characters, taking the first of each. Those two positions are then mixed into the
+    two picks: characters found on one row have their columns stepped forward, characters
+    found in one column have their rows stepped forward, and otherwise the picks cross.
+
+    A character the grid does not hold has no position to be found, so the walk runs off
+    the end of the grid and both positions fall back to ones read out of the pair's own
+    bytes instead.
+    """
+    picks = []
+    for k in range(0, len(MESSAGE_STREAM), 2):
+        first, second = MESSAGE_STREAM[k], MESSAGE_STREAM[k + 1]
+        rowa, cola, rowb, colb = _find_pair(source, first, second)
+        if rowa == rowb:
+            picks += [rowa * 8 + ((cola + 1) & 7), rowb * 8 + ((colb + 1) & 7)]
+        elif cola == colb:
+            picks += [((rowa + 1) & 7) * 8 + cola, ((rowb + 1) & 7) * 8 + colb]
+        else:
+            picks += [rowa * 8 + colb, rowb * 8 + cola]
+    return picks
+
+
+def _find_pair(source, first, second):
+    """Where the two characters sit in source, as four row/column values.
+
+    Returns them as (row, column) of first then of second, or the positions the pair's
+    own bytes name when either character is missing from the grid: first's low bit and
+    second's low two bits for the first position, second modulo six and first's low three
+    bits for the second.
+    """
+    positions = [None, None]
+    for i, byte in enumerate(source):
+        if positions[0] is None and byte == first:
+            positions[0] = (i >> 3, i & 7)
+        if positions[1] is None and byte == second:
+            positions[1] = (i >> 3, i & 7)
+        if positions[0] is not None and positions[1] is not None:
+            return positions[0] + positions[1]
+    return first & 1, second & 3, second % 6, first & 7
+
+
+def _message_vector(body, profile=None, voucher_id=None):
     """The vector the message is rendered from, given the wrapped lock parameter values."""
     profile = _derivation_profile(profile)
-    values = [ord(c) for c in profile.alphabet]
+    alphabet = _voucher_alphabet(voucher_id)
+    if alphabet is None:
+        alphabet = profile.alphabet
+    values = [ord(c) for c in alphabet]
     values += [MESSAGE_MULTIPLIERS[c % 10] * c for c in body]
     _shuffle(values)
     return values + _trickle(values)
@@ -1740,13 +1879,22 @@ class DrmIonVoucher(object):
             # come from the version's own routine, which reads the lock parameter values
             # themselves rather than the shared string assembled here. The voucher does
             # not say which library build it was made for, so one candidate is built under
-            # each profile and whichever of them decrypts is the right one.
+            # each profile; the row count its key builder flattens over comes out of the
+            # voucher id, and every count a capture has shown is offered when there is no
+            # id to read it from.
+            rows = _voucher_rows(self.voucher_id)
+            row_counts = (rows,) if rows is not None else FLATTEN_ROW_CANDIDATES
             for profile in DERIVATION_PROFILES:
-                keycandidates.append(hmac.new(obfuscate4(self.lockparamvalues, self.version,
-                                                         profile),
-                                              message4(self.lockparamvalues, self.version,
-                                                       profile),
-                                              digestmod=hashlib.sha256).digest())
+                for row_count in row_counts:
+                    candidate = (profile if row_count == profile.flatten_rows
+                                 else DerivationProfile(profile.name, row_count, row_count,
+                                                        profile.alphabet,
+                                                        profile.passthrough_hex_secret))
+                    keycandidates.append(hmac.new(
+                        obfuscate4(self.lockparamvalues, self.version, candidate),
+                        message4(self.lockparamvalues, self.version, candidate,
+                                 self.voucher_id),
+                        digestmod=hashlib.sha256).digest())
         for index, key in enumerate(keycandidates, 1):
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:
