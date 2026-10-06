@@ -1491,19 +1491,25 @@ def obfuscate4(lockparamvalues, version, profile=None):
     body = _key_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b""),
                                             profile),
                      lockparamvalues.get("CLIENT_ID", b""))
-    runs = _modulus_runs(body, profile)
+    return _emit(_modulus_runs(body, profile))
 
+
+def _emit(runs):
+    """Walk modulus runs into key material, the way the device's key builder does.
+
+    Each modulus contributes its factors, then every round emits the whole accumulator
+    under the modulus, except that the last round of the last modulus reaches only the
+    loop exit and every last round into a new modulus emits under that new modulus.
+    """
     out = bytearray()
     accumulator = []
-    previous = 0
+    previous = 2
     for index, (modulus, rounds) in enumerate(runs):
-        # k carries over from the previous modulus. A scan at k == 1 can only return the
-        # modulus itself, so the first scan the device performs is the one at k == 2.
-        for factor in _factors(modulus, 2 if previous == 0 else previous):
+        # k carries over from the previous modulus, starting at 2: a scan at k == 1 can
+        # only return the modulus itself, and a run after a modulus of 0 starts at 0.
+        for factor in _factors(modulus, previous):
             accumulator.append(factor)
             out.append(factor & 0xFF)
-        # The last round of the last modulus only reaches the loop exit, and every last
-        # round into a new modulus emits under that new modulus.
         last = index == len(runs) - 1
         following = modulus if last else runs[index + 1][0]
         for round_index in range(rounds - 1 if last else rounds):
@@ -1514,11 +1520,37 @@ def obfuscate4(lockparamvalues, version, profile=None):
     return bytes(out)
 
 
+def obfuscate4_voucher_id(voucher_id, version, profile=None):
+    """HMAC key for a 10001+ voucher that declares no lock parameters.
+
+    Such a voucher leaves the key builder nothing to read from the lock parameters, so
+    the device flattens the voucher id itself instead: ((byte & xor) * (byte | xor) *
+    (byte ^ xor)) % 500 for every byte of the id, where xor is the row count the id also
+    names, and then walks those values as moduli the same way obfuscate4() walks its
+    body's. The result reads neither the account secret nor the client id, so a voucher
+    locked this way decrypts without either. Returns None when there is no id to read.
+    """
+    if isinstance(voucher_id, str):
+        voucher_id = voucher_id.encode('ASCII')
+    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+        return None
+    xor = _voucher_rows(voucher_id)
+    if xor is None:
+        return None
+    values = [((byte & xor) * (byte | xor) * (byte ^ xor)) % 500 for byte in voucher_id]
+    return _emit(_runs_from_values(values))
+
+
 def _modulus_runs(body, profile=None):
     """The distinct flatten values ascending, each with its multiplicity."""
     profile = _derivation_profile(profile)
+    return _runs_from_values(_flatten(body, profile))
+
+
+def _runs_from_values(values):
+    """The distinct values ascending, each with its multiplicity."""
     runs = []
-    for value in sorted(_flatten(body, profile)):
+    for value in sorted(values):
         if runs and runs[-1][0] == value:
             runs[-1][1] += 1
         else:
@@ -1536,19 +1568,18 @@ def _flatten(body, profile=None):
 def _factors(modulus, first_k):
     """The factors a modulus contributes, in the order the device accepts them.
 
-    For each k ascending the device keeps the largest e with k^2 == e^2 (mod modulus)
-    that yields a factor above one, and each distinct factor is accepted once per scan.
+    For each k ascending the device takes every e with k^2 == e^2 (mod modulus) whose
+    gcd(k - e, modulus) is above one, in the order FACTOR_E lists them, and each distinct
+    factor is accepted once per scan.
     """
     accepted = []
     for k in range(first_k, modulus):
-        candidates = [(e, math.gcd(k - e, modulus)) for e in FACTOR_E
-                      if (k * k - e * e) % modulus == 0]
-        candidates = [(e, factor) for e, factor in candidates if factor > 1]
-        if not candidates:
-            continue
-        factor = candidates[-1][1]
-        if factor not in accepted:
-            accepted.append(factor)
+        for e in FACTOR_E:
+            if (k * k - e * e) % modulus:
+                continue
+            factor = math.gcd(k - e, modulus)
+            if factor > 1 and factor not in accepted:
+                accepted.append(factor)
     return accepted
 
 
@@ -1895,6 +1926,18 @@ class DrmIonVoucher(object):
                         message4(self.lockparamvalues, self.version, candidate,
                                  self.voucher_id),
                         digestmod=hashlib.sha256).digest())
+        elif self.version in NEW_KEY_DERIVATION_VERSIONS:
+            # A 10001+ voucher that declares no lock parameters at all: the key builder
+            # flattens the voucher id itself rather than any lock parameter value, so the
+            # key and the message read neither the account secret nor the client id and
+            # the voucher decrypts without either. The message is still built from the
+            # empty body, which is what makes its opening run the voucher id's.
+            voucher_key = obfuscate4_voucher_id(self.voucher_id, self.version)
+            if voucher_key is not None:
+                keycandidates.append(hmac.new(
+                    voucher_key,
+                    message4(self.lockparamvalues, self.version, None, self.voucher_id),
+                    digestmod=hashlib.sha256).digest())
         for index, key in enumerate(keycandidates, 1):
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:
