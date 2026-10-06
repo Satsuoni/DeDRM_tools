@@ -1311,14 +1311,17 @@ def obfuscate3(secret, version):
 # this plugin already accepts, not a verified property of every version in it.
 NEW_KEY_DERIVATION_VERSIONS = range(10001, 11111)
 
-# obfuscate4() and message4() read the lock parameter values and nothing else, so a
-# voucher that declares none of them has nothing for this derivation to read, however new
-# its version is; the Android and some Mac vouchers do exactly that. A voucher may also
-# declare only CLIENT_ID, which is what the 10014 vouchers on Kindles that never received
-# an account secret do: that one has a client id to work from, so it is attempted with an
-# empty secret rather than skipped.
+# A voucher may declare only CLIENT_ID, which is what the 10014 vouchers on Kindles that
+# never received an account secret do: that one has a client id to work from, so it is
+# attempted with an empty secret rather than skipped. One that declares no lock parameters
+# at all is read from its voucher id instead; see obfuscate4_voucher_id().
 def needs_new_key_derivation(version, lockparams):
-    """Whether this voucher's key can come from the version-10001+ derivation."""
+    """Whether this voucher's key comes from the lock parameter values.
+
+    Versions from 10001 on derive the key and the message from those values rather than by
+    permuting the shared secret string, but a voucher that declares none of them is derived
+    from its voucher id instead, so this is false for it.
+    """
     return version in NEW_KEY_DERIVATION_VERSIONS and bool(lockparams)
 
 # The message builder reads the account secret, the client id and these fixed strings as
@@ -1520,7 +1523,7 @@ def _emit(runs):
     return bytes(out)
 
 
-def obfuscate4_voucher_id(voucher_id, version, profile=None):
+def obfuscate4_voucher_id(voucher_id, version):
     """HMAC key for a 10001+ voucher that declares no lock parameters.
 
     Such a voucher leaves the key builder nothing to read from the lock parameters, so
@@ -1905,39 +1908,40 @@ class DrmIonVoucher(object):
         lastexception = None # type: Exception | None
         keycandidates=list(self.keycandidates)
         keycandidates += [hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
-        if needs_new_key_derivation(self.version, self.lockparams):
+        if self.version in NEW_KEY_DERIVATION_VERSIONS:
             # Not one of the shared-secret permutations above: the key and the message both
-            # come from the version's own routine, which reads the lock parameter values
-            # themselves rather than the shared string assembled here. The voucher does
-            # not say which library build it was made for, so one candidate is built under
-            # each profile; the row count its key builder flattens over comes out of the
-            # voucher id, and every count a capture has shown is offered when there is no
-            # id to read it from.
-            rows = _voucher_rows(self.voucher_id)
-            row_counts = (rows,) if rows is not None else FLATTEN_ROW_CANDIDATES
-            for profile in DERIVATION_PROFILES:
-                for row_count in row_counts:
-                    candidate = (profile if row_count == profile.flatten_rows
-                                 else DerivationProfile(profile.name, row_count, row_count,
-                                                        profile.alphabet,
-                                                        profile.passthrough_hex_secret))
+            # come from the version's own routine rather than the shared string assembled
+            # here, and the voucher does not say which library build it was made for.
+            if self.lockparams:
+                # The routine reads the lock parameter values, so one candidate is built
+                # under each profile; the row count its key builder flattens over comes out
+                # of the voucher id, and every count a capture has shown is offered when
+                # there is no id to read it from.
+                rows = _voucher_rows(self.voucher_id)
+                row_counts = (rows,) if rows is not None else FLATTEN_ROW_CANDIDATES
+                for profile in DERIVATION_PROFILES:
+                    for row_count in row_counts:
+                        candidate = (profile if row_count == profile.flatten_rows
+                                     else DerivationProfile(profile.name, row_count, row_count,
+                                                            profile.alphabet,
+                                                            profile.passthrough_hex_secret))
+                        keycandidates.append(hmac.new(
+                            obfuscate4(self.lockparamvalues, self.version, candidate),
+                            message4(self.lockparamvalues, self.version, candidate,
+                                     self.voucher_id),
+                            digestmod=hashlib.sha256).digest())
+            else:
+                # No lock parameters to read: the key builder flattens the voucher id
+                # itself, so the key and the message read neither the account secret nor
+                # the client id and the voucher decrypts without either. The message is
+                # still built from the empty body, which is what makes its opening run the
+                # voucher id's.
+                voucher_key = obfuscate4_voucher_id(self.voucher_id, self.version)
+                if voucher_key is not None:
                     keycandidates.append(hmac.new(
-                        obfuscate4(self.lockparamvalues, self.version, candidate),
-                        message4(self.lockparamvalues, self.version, candidate,
-                                 self.voucher_id),
+                        voucher_key,
+                        message4(self.lockparamvalues, self.version, None, self.voucher_id),
                         digestmod=hashlib.sha256).digest())
-        elif self.version in NEW_KEY_DERIVATION_VERSIONS:
-            # A 10001+ voucher that declares no lock parameters at all: the key builder
-            # flattens the voucher id itself rather than any lock parameter value, so the
-            # key and the message read neither the account secret nor the client id and
-            # the voucher decrypts without either. The message is still built from the
-            # empty body, which is what makes its opening run the voucher id's.
-            voucher_key = obfuscate4_voucher_id(self.voucher_id, self.version)
-            if voucher_key is not None:
-                keycandidates.append(hmac.new(
-                    voucher_key,
-                    message4(self.lockparamvalues, self.version, None, self.voucher_id),
-                    digestmod=hashlib.sha256).digest())
         for index, key in enumerate(keycandidates, 1):
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:

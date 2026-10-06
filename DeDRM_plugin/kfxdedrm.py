@@ -66,10 +66,11 @@ class KFXZipBook:
         """Whether the voucher in this archive derives its key from the account secret.
 
         A new-style version is not enough on its own. The derivation reads the lock
-        parameter values, and a voucher that declares no ACCOUNT_SECRET uses the serial
-        alone, so asking the user for a secret would send them after a credential this
-        voucher never consumes. The 10014 vouchers on Kindles that were never given one
-        are exactly that shape.
+        parameter values, and a voucher that declares no ACCOUNT_SECRET does not consume
+        one, so asking the user for a secret would send them after a credential it never
+        uses. The 10014 vouchers on Kindles that were never given one carry a client id
+        alone, and a voucher that declares no lock parameters at all is derived from its
+        voucher id.
 
         Returns None when the envelope cannot be read at all, so a caller can tell a
         voucher this build does not understand from one that does not need the secret.
