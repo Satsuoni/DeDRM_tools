@@ -88,10 +88,14 @@ import kgenpids
 import androidkindlekey
 import kfxdedrm
 
-from .utilities import SafeUnbuffered
-
-from .argv_utils import unicode_argv
-
+try:
+  from .utilities import SafeUnbuffered
+  from .argv_utils import unicode_argv
+except:
+  from utilities import SafeUnbuffered
+  from argv_utils import unicode_argv
+  
+from ion import unwrap_account_secrets
 
 # cleanup unicode filenames
 # borrowed from calibre from calibre/src/calibre/__init__.py
@@ -139,8 +143,17 @@ def unescape(text):
                 pass
         return text # leave as is
     return re.sub("&#?\\w+;", fixup, text)
-
-def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime = time.time(),skeyfile=None, remove_watermarks=True):
+def try_dehex(val):
+  if isinstance(val,bytes):
+    try:
+      val=val.decode("ASCII")
+    except:
+      return 
+  try:
+    return bytearray.fromhex(val).decode("ASCII")
+  except:
+    return None
+def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime = time.time(),skeyfile=None, remove_watermarks=True,original_path=None):
     # handle the obvious cases at the beginning
     if not os.path.isfile(infile):
         raise DrmException("Input file does not exist.")
@@ -155,7 +168,7 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
         mobi = False
 
     if magic8[:4] == b'PK\x03\x04':
-        mb = kfxdedrm.KFXZipBook(infile,skeyfile,serials)
+        mb = kfxdedrm.KFXZipBook(infile,skeyfile,serials,original_path=original_path)
     elif mobi:
         mb = mobidedrm.MobiBook(infile, remove_watermarks)
     else:
@@ -175,6 +188,47 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
     # extend PID list with book-specific PIDs from seriala and kDatabases
     md1, md2 = mb.getPIDMetaInfo()
     totalpids.extend(kgenpids.getPidList(md1, md2, serials, kDatabases))
+    
+    #let us add pids from k4i, just in case...
+    k4i_serials=set()
+    k4i_secrets=set()
+    accepted_dsn_lengths=[0,16,32,40]
+    accepted_secret_lengths=[0,40]
+    
+    for _,db in kDatabases:
+      dsns=[db.get("DSN",None)]
+      dsns.append(db.get("DSN_clear",None))
+      dsns.extend(db.get("extra.dsns",[]))
+      dsns.extend(db.get("extra.dsns_clear",[]))
+      for dsn in dsns:
+        if dsn is None:
+          continue 
+        if len(dsn) in accepted_dsn_lengths:
+          k4i_serials.add(dsn)
+        uhx=try_dehex(dsn)
+        if uhx is not None and len(uhx) in accepted_dsn_lengths:
+          k4i_serials.add(uhx)
+      secrets=[db.get("kindle.account.tokens",None)]
+      secrets.extend(db.get("kindle.account.secrets",[]))
+      secrets.extend(db.get("kindle.account.new_secrets",[])) #not working for now until key is found
+      secrets.extend(db.get("kindle.account.clear_old_secrets",[]))
+      for secr in secrets:
+        if secr is None:
+          continue 
+        if len(secr) in accepted_secret_lengths:
+          k4i_secrets.add(dsn)
+        uhx=try_dehex(secr)
+        if uhx is not None and len(uhx) in accepted_secret_lengths:
+          k4i_secrets.add(uhx)
+        vals=unwrap_account_secrets(secr)
+        if vals is not None:
+          for s in vals:
+            if len(s) in accepted_secret_lengths:
+              k4i_secrets.add(s)
+    print("Adding {} serials and {} secrets from k4i files".format(len(k4i_serials),len(k4i_secrets)))
+    for dsn in k4i_serials:
+      for sec in  k4i_secrets:
+        totalpids.append(dsn+sec)
     # remove any duplicates
     totalpids = list(set(totalpids))
     print("Found {1:d} keys to try after {0:.1f} seconds".format(time.time()-starttime, len(totalpids)))

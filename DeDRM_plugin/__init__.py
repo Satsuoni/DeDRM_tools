@@ -925,9 +925,14 @@ class DeDRM(FileTypePlugin):
         #print serials
         androidFiles = []
         kindleDatabases = list(dedrmprefs['kindlekeys'].items())
-
         try:
-            book = k4mobidedrm.GetDecryptedBook(path_to_ebook,kindleDatabases,androidFiles,serials,pids,self.starttime,dedrmprefs["kindleextrakeyfile"], dedrmprefs["remove_watermarks"])
+          opath=self.original_path_to_file
+          print("Original file path: {}".format(opath))
+        except:
+          print("Cannot get original path")
+          opath=None
+        try:
+            book = k4mobidedrm.GetDecryptedBook(path_to_ebook,kindleDatabases,androidFiles,serials,pids,self.starttime,dedrmprefs["kindleextrakeyfile"], dedrmprefs["remove_watermarks"],original_path=opath)
         except Exception as e:
             decoded = False
             # perhaps we need to get a new default Kindle for Mac/PC key
@@ -964,7 +969,7 @@ class DeDRM(FileTypePlugin):
             if len(newkeys) > 0:
                 print("{0} v{1}: Found {2} new {3}".format(PLUGIN_NAME, PLUGIN_VERSION, len(newkeys), "key" if len(newkeys)==1 else "keys"))
                 try:
-                    book = k4mobidedrm.GetDecryptedBook(path_to_ebook,newkeys.items(),[],[],[],self.starttime)
+                    book = k4mobidedrm.GetDecryptedBook(path_to_ebook,newkeys.items(),[],[],[],self.starttime,original_path=opath)
                     decoded = True
                     # store the new successful keys in the defaults
                     print("{0} v{1}: Saving {2} new {3}".format(PLUGIN_NAME, PLUGIN_VERSION, len(newkeys), "key" if len(newkeys)==1 else "keys"))

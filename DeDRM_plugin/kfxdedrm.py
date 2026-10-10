@@ -20,7 +20,7 @@ from io import BytesIO
 
 
 from ion import (DrmIon, DrmIonVoucher, SKeyList, needs_new_key_derivation,
-                 unwrap_account_secret)
+                 unwrap_account_secrets)
 import kindlekey
 
 
@@ -30,7 +30,7 @@ __version__ = '2.0'
 
 
 class KFXZipBook:
-    def __init__(self, infile,skeyfile=None,serials=None):
+    def __init__(self, infile,skeyfile=None,serials=None,original_path=None):
         self.infile = infile
         # A snapshot: the caller goes on to extend its serial list with Android dbs.
         self.serials = list(serials or [])
@@ -40,7 +40,9 @@ class KFXZipBook:
           self.skeylist=None
         self.voucher = None
         self.decrypted = {}
-
+        self.original_path=original_path
+        if(self.original_path is None):
+          self.original_path=self.infile
     def getPIDMetaInfo(self):
         return (None, None)
 
@@ -97,22 +99,34 @@ class KFXZipBook:
         """
         secrets = []
         for name in ('acsr', 'account_secret'):
-            value = kindlekey.get_device_setting(name)
+            #print("Original path to file (presumed): {}".format(self.original_path))
+            values=[]
+            value = kindlekey.get_device_setting(name,os.path.dirname(self.original_path))
             if not value:
                 continue
             try:
                 if name == 'acsr':
-                    value = unwrap_account_secret(value)
+                    values = unwrap_account_secrets(value)
+                    print("Got {} values from secrets file: {}".format(len(values),values))
+                else:
+                    if isinstance(value, bytes):
+                      value = value.decode('ASCII')
+                    values=value.split(",")
             except Exception as ex:
                 print("Could not read the {0} file on the device: {1}".format(name, ex))
                 continue
-            if isinstance(value, bytes):
-                value = value.decode('ASCII')
-            if len(value) != 40:
-                print("The {0} file on the device does not hold a 40 character account "
-                      "secret (it is {1} characters).".format(name, len(value)))
-                continue
-            secrets.append(value)
+            for value in values:
+              if isinstance(value, bytes):
+                try:
+                  value = value.decode('ASCII')
+                except Exception as e:
+                  print("Invalid value: {}".format(e))
+                  continue
+              if len(value) != 40:
+                  print("The {0} file on the device does not hold a 40 character account "
+                        "secret (it is {1} characters).".format(name, len(value)))
+                  continue
+              secrets.append(value)
         return [serial + secret
                 for serial in self.serials for secret in secrets]
 
@@ -139,7 +153,7 @@ class KFXZipBook:
         # decrypt one of these, so the account secret pair is tried first rather than
         # only when nothing else was supplied.
         needs_secret = self.voucher_needs_account_secret(data)
-        secret_pids = self.account_secret_pids() if needs_secret else []
+        secret_pids = self.account_secret_pids()# if needs_secret else []
         pids = secret_pids + [''] + totalpids
 
         voucher = None
@@ -176,7 +190,7 @@ class KFXZipBook:
                       "is not available. It needs the Kindle's serial number in the "
                       "plugin's settings, and its acsr file in a de-drm-secrets folder on "
                       "the mounted Kindle; see Other_Tools/Kindle_Account_Secret/ for how "
-                      "to get that file.")
+                      "to get that file. Decryption will probably not work.")
             else:
                 print("Failed to decrypt the KFX DRM voucher with any key.")
                 if lastexception is not None:

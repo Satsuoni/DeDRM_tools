@@ -1373,22 +1373,64 @@ MESSAGE_STREAM = b"dhbi934l3irje98rjnfne949fdnfankANSDW"
 # The device keeps the ACCOUNT_SECRET for its own DRM key derivation wrapped under this
 # key, in a file called acsr. The wrapping key is a firmware constant, not per-device.
 ACSR_WRAP_KEY = b"e35f5062f97cc8b1244f6f1a2414e31c"
+ACSR_WRAP_KEYS = [ACSR_WRAP_KEY] #maybe one day...
+def drilldown(t):
+  """
+  take a list of byte-strings, split it further and b64decode until done
+  """
+  nxt=[]
+  for val in t:
+    if len(val)<=64:
+      nxt.append(val) #should be one of the final values
+      continue
+    if b"," in val: #list of base64
+      subs=val.split(b",")
+      for s in subs:
+        nxt.extend(drilldown([s]))
+      continue
+    #should be base64?
+    try:
+      deval=_b64decode_field(val)
+      nxt.extend(drilldown([deval]))
+    except Exception as e:
+      print("Exception for value {} : {}".format(val,e))
+  return nxt
 
-
-def unwrap_account_secret(acsr):
+def try_unwrap_value(val):
+  if len(val)<16 or len(val)%16!=0:
+    return None
+  for key in ACSR_WRAP_KEYS:
+    aes = AES.new(key, AES.MODE_CBC, val[:16])
+    data=aes.decrypt(val[16:])
+    if data[-1]==8:#40-byte secrets only?
+      try:
+        return pkcs7unpad(data, 16)
+      except:
+        return None 
+  return None
+def unwrap_account_secrets(acsr):
     """Recover the ACCOUNT_SECRET from the device's acsr file contents.
 
     acsr is base64 of base64 of a 16 byte IV followed by the AES-CBC ciphertext. Returns
     the account secret as bytes, ready to be passed to DrmIonVoucher as the secret.
+    Odd fact: some acsr have more than one secret! separated by comma. ALso, not all versions have external base64 wrapping for.. reasons? PC one does not. 
     """
     if isinstance(acsr, str):
         acsr = acsr.encode('ASCII')
-    inner = _b64decode_field(acsr)
-    wrapped = _b64decode_field(inner)
-    _assert(len(wrapped) > 16 and len(wrapped) % 16 == 0,
-            "acsr does not hold an IV and a whole number of cipher blocks")
-    aes = AES.new(ACSR_WRAP_KEY, AES.MODE_CBC, wrapped[:16])
-    return pkcs7unpad(aes.decrypt(wrapped[16:]), 16)
+    
+    wrapped_list=drilldown([acsr])
+    secrets=[]
+    for wrapped in wrapped_list:
+      sec=try_unwrap_value(wrapped)
+      if sec is not None:
+        secrets.append(sec)
+    return secrets 
+    #inner = _b64decode_field(acsr)
+    #wrapped = _b64decode_field(inner)
+    #_assert(len(wrapped) > 16 and len(wrapped) % 16 == 0,
+    #        "acsr does not hold an IV and a whole number of cipher blocks")
+    #aes = AES.new(ACSR_WRAP_KEY, AES.MODE_CBC, wrapped[:16])
+    #return pkcs7unpad(aes.decrypt(wrapped[16:]), 16)
 
 
 def _b64decode_field(value):
@@ -1877,6 +1919,7 @@ class DrmIonVoucher(object):
         self.secretkeycandidate=None
         self.skeylist=skeylist
         self.voucher_id=""
+        self.license_type="unknown"
         self.envelope = BinaryIonParser(voucherenv)
         addprottable(self.envelope)
 
@@ -2059,8 +2102,9 @@ class DrmIonVoucher(object):
             elif self.voucher.getfieldname() == "id":
                 self.voucher_id = self.voucher.stringvalue()
             elif self.voucher.getfieldname() == "license":
-                _assert(self.voucher.gettypename() == "com.amazon.drm.License@1.0",
-                        "Unknown license: %s" % self.voucher.gettypename())
+                if (self.voucher.gettypename() != "com.amazon.drm.License@1.0"):
+                  print("Unknown license: %s" % self.voucher.gettypename())
+                  continue
                 self.voucher.stepin()
                 while self.voucher.hasnext():
                     self.voucher.next()
@@ -2129,6 +2173,8 @@ class DrmIon(object):
                                     self.key=self.skeylist.secretkeys.get(keyname,self.key) # i know they are supposed to be voucher ids, but it is easier to dump them all into one file, their UIDs are distinct anyway
                                     if self.key is not None and len(self.key)>10:
                                         print("Obtained secret key from list: {}".format(self.key.hex()))
+                                    else:
+                                      print("No key id {} in skeylist".format(keyname))
                         if  fname != "encryption_voucher":
                             continue
 
