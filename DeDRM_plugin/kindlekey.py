@@ -946,8 +946,8 @@ def _listdir(path):
         return os.listdir(path)
     except OSError:
         return []
-def get_potential_device():
-  from calibre.devices.scanner import DeviceScanner
+#def get_potential_device():
+#  from calibre.devices.scanner import DeviceScanner
 def get_potential_kindle_roots(book_root):
     """Since there was no actual scan, but just enumeration of all possible disks, I decided to "simplify" it to this """
     candidates=["../","../..","../../.."]
