@@ -24,11 +24,16 @@ import traceback
 from struct import pack
 from struct import unpack
 
-from .alfcrypto import Topaz_Cipher
-from .utilities import SafeUnbuffered
+try:
+  from .alfcrypto import Topaz_Cipher
+  from .utilities import SafeUnbuffered
 
-from .argv_utils import unicode_argv
+  from .argv_utils import unicode_argv
+except: #python sure became weirder with time
+  from alfcrypto import Topaz_Cipher
+  from utilities import SafeUnbuffered
 
+  from argv_utils import unicode_argv
 
 #global switch
 debug = False
