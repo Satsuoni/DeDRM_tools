@@ -155,7 +155,7 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
         mobi = False
 
     if magic8[:4] == b'PK\x03\x04':
-        mb = kfxdedrm.KFXZipBook(infile,skeyfile)
+        mb = kfxdedrm.KFXZipBook(infile,skeyfile,serials)
     elif mobi:
         mb = mobidedrm.MobiBook(infile, remove_watermarks)
     else:

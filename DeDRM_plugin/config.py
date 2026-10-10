@@ -1530,7 +1530,7 @@ class AddPIDDialog(QDialog):
         data_group_box_layout.addLayout(key_group)
         key_group.addWidget(QLabel("PID:", self))
         self.key_ledit = QLineEdit("", self)
-        self.key_ledit.setToolTip("Enter a Mobipocket PID. Mobipocket PIDs are 8 or 10 characters long. Mobipocket PIDs are case-sensitive, so be sure to enter the upper and lower case letters unchanged.")
+        self.key_ledit.setToolTip("Enter a Mobipocket PID, or a Kindle Device ID. Mobipocket PIDs are 8 or 10 characters long. A Kindle Device ID is a device serial, optionally followed by the account secret, and is 16, 32 or 40 characters long without the secret or 56, 72 or 80 with it. Both are case-sensitive, so be sure to enter the upper and lower case letters unchanged.")
         key_group.addWidget(self.key_ledit)
 
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -1552,8 +1552,8 @@ class AddPIDDialog(QDialog):
         if len(self.key_name) == 0 or self.key_name.isspace():
             errmsg = "Please enter a Mobipocket PID or click Cancel in the dialog."
             return error_dialog(None, "{0} {1}".format(PLUGIN_NAME, PLUGIN_VERSION), errmsg, show=True, show_copy_button=False)
-        if len(self.key_name) != 8 and len(self.key_name) != 10:
-            errmsg = "Mobipocket PIDs must be 8 or 10 characters long. This is {0:d} characters long.".format(len(self.key_name))
+        if len(self.key_name) not in (8, 10, 16, 32, 40, 56, 72, 80):
+            errmsg = "Mobipocket PIDs are 8 or 10 characters long. Kindle Device IDs are a 16, 32 or 40 character device serial, optionally followed by the 40 character account secret. This is {0:d} characters long.".format(len(self.key_name))
             return error_dialog(None, "{0} {1}".format(PLUGIN_NAME, PLUGIN_VERSION), errmsg, show=True, show_copy_button=False)
         QDialog.accept(self)
 

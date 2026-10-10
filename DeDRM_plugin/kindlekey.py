@@ -40,6 +40,7 @@ Retrieve Kindle for PC/Mac user key.
 import sys, os, re
 import codecs
 from struct import pack, unpack, unpack_from
+from string import ascii_uppercase
 import json
 import getopt
 import traceback
@@ -915,6 +916,45 @@ def kindlekeys(files = []):
             # key = {k.decode():v.decode() for k,v in key.items()}
             keys.append(n_key)
     return keys
+
+
+# The e-ink firmware keeps its account secret in /var/local/java/prefs/acsr, which is not
+# exported over the USB mount, so a jailbroken device's copy under de-drm-secrets is read.
+KINDLE_DEVICE_SETTING_DIRS = ('de-drm-secrets', os.path.join('documents', 'de-drm-secrets'))
+
+def _listdir(path):
+    """os.listdir for an optional path: an absent or unreadable one yields nothing."""
+    try:
+        return os.listdir(path)
+    except OSError:
+        return []
+
+def get_mounted_kindle_roots():
+    """Paths a Kindle is mounted at, so its system files can be read over USB."""
+    if iswindows:
+        candidates = ['{0}:\\'.format(letter) for letter in ascii_uppercase]
+    else:
+        # macOS mounts removable media in /Volumes; Linux desktops use /media or /mnt,
+        # usually one level down (/media/Kindle) and sometimes two (/media/<user>/Kindle).
+        bases = ['/Volumes'] if isosx else ['/media', '/mnt', '/run/media']
+        candidates = list(bases)
+        for base in bases:
+            for first in _listdir(base):
+                path = os.path.join(base, first)
+                candidates.append(path)
+                candidates += [os.path.join(path, second) for second in _listdir(path)]
+    return [path for path in candidates
+            if os.path.isfile(os.path.join(path, 'system', 'version.txt'))]
+
+def get_device_setting(name):
+    """Read one device DRM setting from a mounted Kindle, or return None."""
+    for root in get_mounted_kindle_roots():
+        for dirname in KINDLE_DEVICE_SETTING_DIRS:
+            path = os.path.join(root, dirname, name)
+            if os.path.isfile(path):
+                with open(path, 'rb') as fh:
+                    return fh.read().strip()
+    return None
 
 # interface for Python DeDRM
 # returns single key or multiple keys, depending on path or file passed in

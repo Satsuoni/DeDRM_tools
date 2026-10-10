@@ -17,8 +17,10 @@ Copyright © 2013-2020 Apprentice Harper et al.
 """
 
 import collections
+import base64
 import hashlib
 import hmac
+import math
 import os
 import os.path
 import struct
@@ -774,8 +776,10 @@ def pkcs7unpad(msg, blocklen):
 
 
 
-# every VoucherEnvelope version has a corresponding "word" and magic number, used in obfuscating the shared secret
-# 4-digit versions use their own obfuscation/scramble. It does not seem to depend on the "word" and number
+# The versions below all come from one table, but "every version has a word" is wrong: it covers
+# 2..28, 9708, 1031, 2069, 9041, 3646, 6052, 9479, 9888, 4648 and 5683 only.  There is no entry for
+# 10001 and up -- or for 7384, 2746 and 3332 -- so a voucher version absent from this table gets no
+# obfuscation at all.  See tools/kindle-re/README.md for the emulated lookup that shows this.
 OBFUSCATION_TABLE = {
     "V1":    (0x00, None),
     "V2":    (0x05, b'Antidisestablishmentarianism'),
@@ -1300,6 +1304,522 @@ def obfuscate3(secret, version):
         obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
     return obfuscated
 
+# VoucherEnvelope versions from 10001 on do not derive the voucher key by permuting the
+# shared secret string. They hand the lock parameter values to a routine that returns both
+# the HMAC key and the message, and for those versions the message is no longer the
+# constant b"PIDv3" that the versions below use. The boundary here is the ION symbol range
+# this plugin already accepts, not a verified property of every version in it.
+NEW_KEY_DERIVATION_VERSIONS = range(10001, 11111)
+
+# A voucher may declare only CLIENT_ID, which is what the 10014 vouchers on Kindles that
+# never received an account secret do: that one has a client id to work from, so it is
+# attempted with an empty secret rather than skipped. One that declares no lock parameters
+# at all is read from its voucher id instead; see obfuscate4_voucher_id().
+def needs_new_key_derivation(version, lockparams):
+    """Whether this voucher's key comes from the lock parameter values.
+
+    Versions from 10001 on derive the key and the message from those values rather than by
+    permuting the shared secret string, but a voucher that declares none of them is derived
+    from its voucher id instead, so this is false for it.
+    """
+    return version in NEW_KEY_DERIVATION_VERSIONS and bool(lockparams)
+
+# The message builder reads the account secret, the client id and these fixed strings as
+# one run of bytes, then maps each byte to MESSAGE_MULTIPLIERS[byte % 10] * byte. The key
+# builder reads the account secret and the client id alone, with no fixed padding.
+MESSAGE_PREFIX = b"hsrevf43is ds_"
+MESSAGE_SUFFIX = b"-89kndeh83n303"
+MESSAGE_ALPHABET = ".e7G270E7VaO8098SaAm8062wmmAm1SFOMAy"
+MESSAGE_MULTIPLIERS = [28, 88, 28, 100, 35, 118, 271, 231, 184, 240,
+                       40, 120, 105, 132, 290, 52, 60, 31, 171, 49]
+
+# One of the library builds that arrived with the B00 serial vouchers opens its message
+# vector with this run of characters instead. Its prefix, suffix and multiplier table are
+# byte identical to MESSAGE_PREFIX, MESSAGE_SUFFIX and MESSAGE_MULTIPLIERS, so this is
+# the only string that differs; the first 36 entries of the vector the device shuffles
+# are the ords of this run rather than of MESSAGE_ALPHABET.
+MESSAGE_ALPHABET_B = ".eDV5AD_4j.VoAB8H.OmoA35FmmOm1F9dOCx"
+
+# The other two of those three vouchers open their message vector with a run of their own,
+# so the three captures between them disagree on all three of the constants a build fixes
+# and no two share a profile. Both runs below were recovered by inverting message4()'s
+# shuffle and heap walk against the HMAC message the library emitted for its own voucher,
+# and each reproduces that message byte for byte, as MESSAGE_ALPHABET_B does for
+# B00I765ZEU. _shuffle is not one to one in the alphabet once the body is fixed, so what
+# is pinned is a member of the class the capture admits rather than necessarily the run
+# itself; the body is the account secret and the client id, so this is exact for the
+# device these came from and would have to be re-derived for another serial.
+MESSAGE_ALPHABET_C = ".Fe06z2J570N729.kz5z82f63zz5m1jijZ1i"
+MESSAGE_ALPHABET_D = ".e-Jjh0RBjdJhjB1VdDuLj7iAnuDm1T6SECX"
+
+# The message vector's opening run is not a constant of a build after all: the library
+# picks its 36 characters out of a 64 character source it builds from the voucher's own
+# id, so what a voucher opens with follows from the voucher rather than from the library
+# that made it. MESSAGE_ALPHABET and its three variants stand in for what that rule
+# builds when a voucher carries no id to build one from; where a run and the rule
+# disagree, the run is a member of the class the inversion admitted rather than the run
+# the library built, which is what the note above says of MESSAGE_ALPHABET_C and
+# MESSAGE_ALPHABET_D.
+#
+# VOUCHER_ID_PREFIX heads every voucher id. SOURCE_SEED is the run the source starts as,
+# permuted by SOURCE_ROUNDS swaps each driven by one byte of the id. MESSAGE_STREAM is a
+# fixed 36 character run of the library's, holding next to the message builder's own
+# fixed strings, whose 18 pairs decide which 36 of the source's positions are read.
+VOUCHER_ID_PREFIX = b"amzn1.drm-voucher.v1."
+SOURCE_SEED = b"0Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh-8Ii9JjKkLlMmNnOoPpQqR_rSsTtUuVvWwXxYyZz"
+SOURCE_ROUNDS = 22
+MESSAGE_STREAM = b"dhbi934l3irje98rjnfne949fdnfankANSDW"
+
+# The device keeps the ACCOUNT_SECRET for its own DRM key derivation wrapped under this
+# key, in a file called acsr. The wrapping key is a firmware constant, not per-device.
+ACSR_WRAP_KEY = b"e35f5062f97cc8b1244f6f1a2414e31c"
+
+
+def unwrap_account_secret(acsr):
+    """Recover the ACCOUNT_SECRET from the device's acsr file contents.
+
+    acsr is base64 of base64 of a 16 byte IV followed by the AES-CBC ciphertext. Returns
+    the account secret as bytes, ready to be passed to DrmIonVoucher as the secret.
+    """
+    if isinstance(acsr, str):
+        acsr = acsr.encode('ASCII')
+    inner = _b64decode_field(acsr)
+    wrapped = _b64decode_field(inner)
+    _assert(len(wrapped) > 16 and len(wrapped) % 16 == 0,
+            "acsr does not hold an IV and a whole number of cipher blocks")
+    aes = AES.new(ACSR_WRAP_KEY, AES.MODE_CBC, wrapped[:16])
+    return pkcs7unpad(aes.decrypt(wrapped[16:]), 16)
+
+
+def _b64decode_field(value):
+    """Decode a whole base64 field, ignoring only surrounding whitespace.
+
+    Unlike _b64decode_whole_groups() this keeps the padding, because these fields stand
+    alone rather than being a prefix of a longer string.
+    """
+    return base64.b64decode(b''.join(value.split()))
+
+# The key builder flattens the same wrapped lock parameter values into a vector of
+# ((byte << k) ^ xor) % 500, then walks the distinct values in ascending order as moduli.
+# These are the PW4's xor and row count; which pair a build uses travels in
+# DerivationProfile.
+FLATTEN_XOR = 9
+FLATTEN_ROWS = 9
+
+# The row count is not fixed per build: captures from one build and one credential, with
+# only the voucher id changed, produce keys of five different lengths, and each length
+# belongs to exactly one (xor, rows) pair in which the two agree and range over these five.
+# The device reads the count out of the voucher id; _voucher_rows() recomputes it, and
+# these are the counts offered when there is no id to read.
+FLATTEN_ROW_CANDIDATES = (1, 3, 5, 7, 9)
+FACTOR_E = (2, 3, 5, 7)
+
+
+class DerivationProfile(object):
+    """One library build's constants for obfuscate4() and message4().
+
+    A voucher carries its lock parameter values and its version, and says nothing about
+    which build of the SDK produced it, so the properties builds have been observed to
+    disagree on travel together as one profile:
+
+    flatten_xor and flatten_rows shape the key builder's flatten vector,
+    alphabet is the run of characters the message vector opens with when there is no
+    voucher id to build one from, and
+    passthrough_hex_secret says how a 40 character ACCOUNT_SECRET, the form
+    unwrap_account_secret returns, is read: a build either uses it as it stands or
+    base64 decodes it like any other encoded secret, which turns those 40 characters
+    into the 30 bytes they spell.
+
+    passthrough_hex_secret is a constant a build fixes; the alphabet is not one of them,
+    and neither is the row count. message4() prefers the run _voucher_alphabet() builds
+    from the voucher's id and reaches for profile.alphabet when the voucher does not carry
+    an id it can read, and decryptvoucher() takes the row count from _voucher_rows() the
+    same way, falling back to every FLATTEN_ROW_CANDIDATES count when there is no id.
+    """
+
+    def __init__(self, name, flatten_xor, flatten_rows, alphabet, passthrough_hex_secret):
+        self.name = name
+        self.flatten_xor = flatten_xor
+        self.flatten_rows = flatten_rows
+        self.alphabet = alphabet
+        self.passthrough_hex_secret = passthrough_hex_secret
+
+    def __repr__(self):
+        return "DerivationProfile(%r)" % (self.name,)
+
+
+# Every profile below was checked against output captured from the library it describes:
+# "pw4" against the firmware's own HMAC key and message for the real credential, "pr135"
+# against the key and message the library shipped in pr135-files.zip emitted for every
+# lock parameter combination tried against it, and the three named for the voucher each was
+# taken from against that voucher's own key and message. decryptvoucher() offers a
+# candidate built under each, because nothing in the voucher says which library to use.
+#
+# The last three read the 40 character secret unwrap_account_secret returns as it stands,
+# which is the form the plugin holds: under that reading each reproduces the key and the
+# message in its capture. pr135 and b00i765zeu agree on MESSAGE_ALPHABET_B and on the
+# flatten pair and still are not one build: pr135 base64 decodes the secret its own
+# harness handed it, and the capture behind b00i765zeu does not.
+DERIVATION_PROFILES = (
+    DerivationProfile("pw4", FLATTEN_XOR, FLATTEN_ROWS, MESSAGE_ALPHABET, True),
+    DerivationProfile("pr135", 3, 3, MESSAGE_ALPHABET_B, False),
+    DerivationProfile("b00i765zeu", 3, 3, MESSAGE_ALPHABET_B, True),
+    DerivationProfile("b00cvs2j80", 9, 9, MESSAGE_ALPHABET_C, True),
+    DerivationProfile("b00spvpx2g", 1, 1, MESSAGE_ALPHABET_D, True),
+)
+
+
+def _derivation_profile(profile):
+    """The profile to derive under, defaulting to the first one tried."""
+    return DERIVATION_PROFILES[0] if profile is None else profile
+
+
+def obfuscate4(lockparamvalues, version, profile=None):
+    """HMAC key for a VoucherEnvelope version in NEW_KEY_DERIVATION_VERSIONS.
+
+    Unlike obfuscate()/obfuscate2()/obfuscate3(), which permute one shared secret string,
+    these versions read the lock parameter values themselves, so the result's length
+    depends on the bytes of the ACCOUNT_SECRET and CLIENT_ID values rather than only on
+    the length of the shared string.
+
+    lockparamvalues maps the lock parameter name to its value as bytes: ACCOUNT_SECRET is
+    the account secret and CLIENT_ID the device serial. Either may be absent, and is read
+    as empty: a voucher can carry a client id with no account secret, which is what the
+    versions on Kindles that were never given one look like. version selects the
+    derivation, and is unused here because versions in this range share one. profile
+    selects the library build to derive under, and defaults to the first of
+    DERIVATION_PROFILES; see DerivationProfile for what differs between them.
+    """
+    profile = _derivation_profile(profile)
+    body = _key_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b""),
+                                            profile),
+                     lockparamvalues.get("CLIENT_ID", b""))
+    return _emit(_modulus_runs(body, profile))
+
+
+def _emit(runs):
+    """Walk modulus runs into key material, the way the device's key builder does.
+
+    Each modulus contributes its factors, then every round emits the whole accumulator
+    under the modulus, except that the last round of the last modulus reaches only the
+    loop exit and every last round into a new modulus emits under that new modulus.
+    """
+    out = bytearray()
+    accumulator = []
+    previous = 2
+    for index, (modulus, rounds) in enumerate(runs):
+        # k carries over from the previous modulus, starting at 2: a scan at k == 1 can
+        # only return the modulus itself, and a run after a modulus of 0 starts at 0.
+        for factor in _factors(modulus, previous):
+            accumulator.append(factor)
+            out.append(factor & 0xFF)
+        last = index == len(runs) - 1
+        following = modulus if last else runs[index + 1][0]
+        for round_index in range(rounds - 1 if last else rounds):
+            emit_modulus = following if round_index == rounds - 1 else modulus
+            for i, value in enumerate(accumulator):
+                out.append(((value * (emit_modulus + 1)) & 0xFFFF ^ (emit_modulus ^ i)) & 0xFF)
+        previous = modulus
+    return bytes(out)
+
+
+def obfuscate4_voucher_id(voucher_id, version):
+    """HMAC key for a 10001+ voucher that declares no lock parameters.
+
+    Such a voucher leaves the key builder nothing to read from the lock parameters, so
+    the device flattens the voucher id itself instead: ((byte & xor) * (byte | xor) *
+    (byte ^ xor)) % 500 for every byte of the id, where xor is the row count the id also
+    names, and then walks those values as moduli the same way obfuscate4() walks its
+    body's. The result reads neither the account secret nor the client id, so a voucher
+    locked this way decrypts without either. Returns None when there is no id to read.
+    """
+    if isinstance(voucher_id, str):
+        voucher_id = voucher_id.encode('ASCII')
+    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+        return None
+    xor = _voucher_rows(voucher_id)
+    if xor is None:
+        return None
+    values = [((byte & xor) * (byte | xor) * (byte ^ xor)) % 500 for byte in voucher_id]
+    return _emit(_runs_from_values(values))
+
+
+def _modulus_runs(body, profile=None):
+    """The distinct flatten values ascending, each with its multiplicity."""
+    profile = _derivation_profile(profile)
+    return _runs_from_values(_flatten(body, profile))
+
+
+def _runs_from_values(values):
+    """The distinct values ascending, each with its multiplicity."""
+    runs = []
+    for value in sorted(values):
+        if runs and runs[-1][0] == value:
+            runs[-1][1] += 1
+        else:
+            runs.append([value, 1])
+    return [tuple(run) for run in runs]
+
+
+def _flatten(body, profile=None):
+    """The profile's flatten of every byte of the body: ((byte << k) ^ xor) % 500."""
+    profile = _derivation_profile(profile)
+    return [((byte << k) ^ profile.flatten_xor) % 500
+            for k in range(profile.flatten_rows) for byte in body]
+
+
+def _factors(modulus, first_k):
+    """The factors a modulus contributes, in the order the device accepts them.
+
+    For each k ascending the device takes every e with k^2 == e^2 (mod modulus) whose
+    gcd(k - e, modulus) is above one, in the order FACTOR_E lists them, and each distinct
+    factor is accepted once per scan.
+    """
+    accepted = []
+    for k in range(first_k, modulus):
+        for e in FACTOR_E:
+            if (k * k - e * e) % modulus:
+                continue
+            factor = math.gcd(k - e, modulus)
+            if factor > 1 and factor not in accepted:
+                accepted.append(factor)
+    return accepted
+
+
+def message4(lockparamvalues, version, profile=None, voucher_id=None):
+    """HMAC message for a VoucherEnvelope version in NEW_KEY_DERIVATION_VERSIONS.
+
+    Takes the same lockparamvalues argument as obfuscate4(), and the same profile: the
+    message and the key are built under one library build's constants, not one of each.
+    voucher_id is the envelope's voucher id when the caller has it, and it decides the 36
+    characters the message opens with; profile.alphabet stands in when there is no id to
+    build those characters from. Returns bytes.
+
+    The message is the concatenation of the decimal renderings of a vector of 32 bit
+    values, in the order a breadth first walk of an implicit binary heap visits them.
+    """
+    profile = _derivation_profile(profile)
+    body = _message_body(_decode_account_secret(lockparamvalues.get("ACCOUNT_SECRET", b""),
+                                                profile),
+                         lockparamvalues.get("CLIENT_ID", b""))
+    vector = _message_vector(body, profile, voucher_id)
+    order = _heap_walk_order(len(vector))
+    return ''.join(str(vector[i]) for i in order).encode('ASCII')
+
+
+def _decode_account_secret(account_secret, profile=None):
+    """The account secret as the device's key and message builders receive it, as bytes.
+
+    The acsr file holds the secret base64 encoded, so it is decoded here. What differs
+    between library builds is the unwrapped form: most of the profiles below use the 40
+    hex characters unwrap_account_secret() returns as they stand, while pr135 base64
+    decodes them like any other encoded secret, which turns those 40 characters into the
+    30 bytes they spell. profile decides which reading applies; see DerivationProfile.
+    """
+    profile = _derivation_profile(profile)
+    if isinstance(account_secret, str):
+        account_secret = account_secret.encode('ASCII')
+    if profile.passthrough_hex_secret and _is_account_secret(account_secret):
+        return account_secret
+    return _b64decode_whole_groups(account_secret)
+
+
+def _is_account_secret(value):
+    """Whether value is an already unwrapped account secret. value must be bytes.
+
+    The unwrapped secret is 40 lowercase hex characters, and every one of them is also a
+    base64 digit, so this shape alone does not say how the value is to be read: that is
+    what DerivationProfile.passthrough_hex_secret decides.
+    """
+    return (len(value) == 40
+            and all(c in b'0123456789abcdef' for c in value))
+
+
+def _key_body(account_secret, client_id):
+    """The bytes the HMAC key is built from: the account secret then the client id."""
+    return account_secret + client_id
+
+
+def _message_body(account_secret, client_id):
+    """The bytes the HMAC message is built from: the key body inside fixed padding."""
+    return MESSAGE_PREFIX + _key_body(account_secret, client_id) + MESSAGE_SUFFIX
+
+
+def _b64decode_whole_groups(value):
+    """Decode the account secret the way the device does.
+
+    The device decodes as many whole 4 character groups as the string holds and ignores
+    any remainder, so a 5 character secret decodes to the same bytes as its first 4.
+    """
+    return base64.b64decode(value[:(len(value) // 4) * 4])
+
+
+def _voucher_alphabet(voucher_id):
+    """The 36 characters the message vector opens with for this voucher, or None.
+
+    voucher_id is the envelope's voucher id, the string VOUCHER_ID_PREFIX heads. An id
+    of any other shape builds nothing, so None tells the caller to fall back to the run
+    the profile carries.
+    """
+    if isinstance(voucher_id, str):
+        voucher_id = voucher_id.encode('ASCII')
+    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+        return None
+    source = _voucher_source(voucher_id)
+    return bytes(source[i] for i in _message_picks(source)).decode('ASCII')
+
+
+def _voucher_rows(voucher_id):
+    """The row count the key builder flattens over, read out of the voucher id, or None.
+
+    The device starts an accumulator at ten and folds every character of the id through
+    acc = ((c << (c & 1)) ^ acc) % 10, replacing a zero with three; the result is the count.
+    An id of any other shape reads no count, so None tells the caller to fall back to the
+    counts FLATTEN_ROW_CANDIDATES names.
+    """
+    if isinstance(voucher_id, str):
+        voucher_id = voucher_id.encode('ASCII')
+    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+        return None
+    acc = 10
+    for byte in voucher_id:
+        acc = ((byte << (byte & 1)) ^ acc) % 10
+        if acc == 0:
+            acc = 3
+    return acc
+
+
+def _voucher_source(voucher_id):
+    """The 64 character run the message vector's opening 36 are picked out of.
+
+    SOURCE_SEED is swapped SOURCE_ROUNDS times, each swap driven by the next byte of the
+    id and the byte of the seed it lands on. The id's characters in first appearance
+    order are then written in front of the seed's characters the id does not hold, and
+    the run is cut back to the seed's length.
+    """
+    seed = bytearray(SOURCE_SEED)
+    acc = 1
+    for k in range(SOURCE_ROUNDS):
+        i = 3 * k
+        acc ^= voucher_id[i % len(voucher_id)] ^ seed[i]
+        j = (i ^ acc) & 0x3f
+        seed[i], seed[j] = seed[j], seed[i]
+    head = []
+    seen = set()
+    for byte in voucher_id:
+        if byte not in seen:
+            seen.add(byte)
+            head.append(byte)
+    tail = [byte for byte in seed if byte not in seen]
+    return bytes((head + tail)[:len(SOURCE_SEED)])
+
+
+def _message_picks(source):
+    """The 36 positions in source the message vector's opening run reads, in order.
+
+    source is read as an 8 by 8 grid. MESSAGE_STREAM holds 18 character pairs, and for
+    each pair the library walks the grid in row order until it has met both of the pair's
+    characters, taking the first of each. Those two positions are then mixed into the
+    two picks: characters found on one row have their columns stepped forward, characters
+    found in one column have their rows stepped forward, and otherwise the picks cross.
+
+    A character the grid does not hold has no position to be found, so the walk runs off
+    the end of the grid and both positions fall back to ones read out of the pair's own
+    bytes instead.
+    """
+    picks = []
+    for k in range(0, len(MESSAGE_STREAM), 2):
+        first, second = MESSAGE_STREAM[k], MESSAGE_STREAM[k + 1]
+        rowa, cola, rowb, colb = _find_pair(source, first, second)
+        if rowa == rowb:
+            picks += [rowa * 8 + ((cola + 1) & 7), rowb * 8 + ((colb + 1) & 7)]
+        elif cola == colb:
+            picks += [((rowa + 1) & 7) * 8 + cola, ((rowb + 1) & 7) * 8 + colb]
+        else:
+            picks += [rowa * 8 + colb, rowb * 8 + cola]
+    return picks
+
+
+def _find_pair(source, first, second):
+    """Where the two characters sit in source, as four row/column values.
+
+    Returns them as (row, column) of first then of second, or the positions the pair's
+    own bytes name when either character is missing from the grid: first's low bit and
+    second's low two bits for the first position, second modulo six and first's low three
+    bits for the second.
+    """
+    positions = [None, None]
+    for i, byte in enumerate(source):
+        if positions[0] is None and byte == first:
+            positions[0] = (i >> 3, i & 7)
+        if positions[1] is None and byte == second:
+            positions[1] = (i >> 3, i & 7)
+        if positions[0] is not None and positions[1] is not None:
+            return positions[0] + positions[1]
+    return first & 1, second & 3, second % 6, first & 7
+
+
+def _message_vector(body, profile=None, voucher_id=None):
+    """The vector the message is rendered from, given the wrapped lock parameter values."""
+    profile = _derivation_profile(profile)
+    alphabet = _voucher_alphabet(voucher_id)
+    if alphabet is None:
+        alphabet = profile.alphabet
+    values = [ord(c) for c in alphabet]
+    values += [MESSAGE_MULTIPLIERS[c % 10] * c for c in body]
+    _shuffle(values)
+    return values + _trickle(values)
+
+
+def _shuffle(values):
+    """Swap each entry with a data dependent partner, in place.
+
+    Position k is swapped values[k] % 10 times, re-read after every swap, and the partner
+    is (k << (n % 3)) % len(values) for the decreasing counter n.
+    """
+    length = len(values)
+    for k in range(length):
+        n = values[k] % 10
+        while n:
+            j = (k << (n % 3)) % length
+            values[k], values[j] = values[j], values[k]
+            n -= 1
+
+
+def _trickle(values):
+    """The appended part: a monotonic stack over the vector, emitting differences."""
+    stack = []
+    out = []
+    j = 0
+    while j < len(values):
+        if stack and values[stack[-1]] < values[j]:
+            popped = values[stack.pop()]
+            if stack:
+                top = stack[-1]
+                out.append((min(values[j], values[top]) - popped) * (j - top - 1))
+        else:
+            stack.append(j)
+            j += 1
+    return out
+
+
+def _heap_walk_order(n):
+    """Breadth first walk of an implicit binary heap from its middle, without repeats."""
+    queue = collections.deque([n // 2])
+    seen = [False] * n
+    order = []
+    while queue:
+        i = queue.popleft()
+        if seen[i]:
+            continue
+        seen[i] = True
+        order.append(i)
+        for j in (2 * i + 1, 2 * i + 2, (i - 1) >> 1 if i else -1):
+            if 0 <= j < n and not seen[j]:
+                queue.append(j)
+    return order
+
+
 class SKeyList(object):
     def __init__(self, skeyfile):
       self.keycandidates={}
@@ -1339,8 +1859,11 @@ class DrmIonVoucher(object):
     cipheriv = b""
     secretkey = b""
 
-    def __init__(self, voucherenv, dsn, secret,skeylist=None):
+    def __init__(self, voucherenv, dsn, secret,skeylist=None,quiet=False):
         self.dsn, self.secret = dsn, secret
+        # Set by a caller that tries several PIDs in a row and prints one summary
+        # itself, so that a failure is not reported once per PID.
+        self.quiet = quiet
 
         if isinstance(dsn, str):
             self.dsn = dsn.encode('ASCII')
@@ -1349,6 +1872,7 @@ class DrmIonVoucher(object):
             self.secret = secret.encode('ASCII')
 
         self.lockparams = []
+        self.lockparamvalues = {}
         self.keycandidates=[]
         self.secretkeycandidate=None
         self.skeylist=skeylist
@@ -1361,13 +1885,17 @@ class DrmIonVoucher(object):
 
         self.lockparams.sort()
         print("Lock parameters used: {}".format(self.lockparams))
+        # Rebuilt rather than appended to, so that a second call cannot double the values.
+        self.lockparamvalues = {}
         for param in self.lockparams:
             if param == "ACCOUNT_SECRET":
-                shared += param.encode('ASCII') + self.secret
+                value = self.secret
             elif param == "CLIENT_ID":
-                shared += param.encode('ASCII') + self.dsn
+                value = self.dsn
             else:
                 _assert(False, "Unknown lock parameter: %s" % param)
+            shared += param.encode('ASCII') + value
+            self.lockparamvalues[param] = value
 
 
         # i know that version maps to scramble pretty much 1 to 1, but there was precendent where they changed it, so...
@@ -1378,8 +1906,43 @@ class DrmIonVoucher(object):
 
         decrypted=False
         lastexception = None # type: Exception | None
-        keycandidates=self.keycandidates+[hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
-        for key in keycandidates:
+        keycandidates=list(self.keycandidates)
+        keycandidates += [hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
+        if self.version in NEW_KEY_DERIVATION_VERSIONS:
+            # Not one of the shared-secret permutations above: the key and the message both
+            # come from the version's own routine rather than the shared string assembled
+            # here, and the voucher does not say which library build it was made for.
+            if self.lockparams:
+                # The routine reads the lock parameter values, so one candidate is built
+                # under each profile; the row count its key builder flattens over comes out
+                # of the voucher id, and every count a capture has shown is offered when
+                # there is no id to read it from.
+                rows = _voucher_rows(self.voucher_id)
+                row_counts = (rows,) if rows is not None else FLATTEN_ROW_CANDIDATES
+                for profile in DERIVATION_PROFILES:
+                    for row_count in row_counts:
+                        candidate = (profile if row_count == profile.flatten_rows
+                                     else DerivationProfile(profile.name, row_count, row_count,
+                                                            profile.alphabet,
+                                                            profile.passthrough_hex_secret))
+                        keycandidates.append(hmac.new(
+                            obfuscate4(self.lockparamvalues, self.version, candidate),
+                            message4(self.lockparamvalues, self.version, candidate,
+                                     self.voucher_id),
+                            digestmod=hashlib.sha256).digest())
+            else:
+                # No lock parameters to read: the key builder flattens the voucher id
+                # itself, so the key and the message read neither the account secret nor
+                # the client id and the voucher decrypts without either. The message is
+                # still built from the empty body, which is what makes its opening run the
+                # voucher id's.
+                voucher_key = obfuscate4_voucher_id(self.voucher_id, self.version)
+                if voucher_key is not None:
+                    keycandidates.append(hmac.new(
+                        voucher_key,
+                        message4(self.lockparamvalues, self.version, None, self.voucher_id),
+                        digestmod=hashlib.sha256).digest())
+        for index, key in enumerate(keycandidates, 1):
             aes = AES.new(key[:32], AES.MODE_CBC, self.cipheriv[:16])
             try:
                 b = aes.decrypt(self.ciphertext)
@@ -1391,14 +1954,17 @@ class DrmIonVoucher(object):
                     "Expected KeySet, got %s" % self.drmkey.gettypename())
                 decrypted=True
 
-                print("Decryption succeeded")
+                print("Decryption succeeded with candidate {0} of {1}".format(
+                    index, len(keycandidates)))
                 break
             except Exception as ex:
                 lastexception = ex
-                print("Decryption failed, trying next fallback ")
         if not decrypted:
+            if self.quiet:
+                raise lastexception
+            print("Tried {0} key candidates for voucher version {1}, none of them worked. "
+                  "The last one failed with: {2}".format(len(keycandidates), self.version, lastexception))
             if self.secretkeycandidate is None:
-              print("Failed all decryption attempts and no key candidate available")
               raise lastexception
             else:
                 print("Failed all decryption attempts but we have a key candidate")
@@ -1593,7 +2159,7 @@ class DrmIon(object):
                             ct = self.ion.lobvalue()
                         elif self.ion.getfieldname() == "cipher_iv":
                             civ = self.ion.lobvalue()
-                    _assert(self.key is not None, "Unable to obtain secret key from voucher or keylist")
+                    _assert(self.key is not None and len(self.key) > 0, "Unable to obtain secret key from voucher or keylist")
                     if ct is not None and civ is not None:
                         self.processpage(ct, civ, outpages, decompress, decrypt)
                     self.ion.stepout()
