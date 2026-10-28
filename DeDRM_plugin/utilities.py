@@ -7,6 +7,18 @@ import sys
 
 __license__ = 'GPL v3'
 
+RELATIONAL_CONTAINER_MAGIC = b'SQLite format 3\x00'
+
+
+def is_relational_container(path):
+    """Header only, never the body: dispatch can't use the extension, since a
+    fragment database arrives bare."""
+    try:
+        with open(path, 'rb') as header_file:
+            return header_file.read(len(RELATIONAL_CONTAINER_MAGIC)) == RELATIONAL_CONTAINER_MAGIC
+    except (IOError, OSError):
+        return False
+
 def uStrCmp (s1, s2, caseless=False):
     import unicodedata as ud
     if sys.version_info[0] == 2:
