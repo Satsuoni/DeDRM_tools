@@ -20,9 +20,9 @@ import collections
 import base64
 import hashlib
 import hmac
-import math
 import os
 import os.path
+import re
 import struct
 
 from io import BytesIO
@@ -63,6 +63,32 @@ try:
  from .kfxtables import *
 except:
  from kfxtables import *
+
+
+def _stream_value(stream):
+    """The bytes a one-shot stream holds, or None when there is no stream.
+
+    Snapshot at construction: the parser walks the same stream, so this is the last moment the
+    bytes can be read.
+    """
+    getter = getattr(stream, 'getvalue', None)
+    if getter is None:
+        return None
+    try:
+        return bytes(getter())
+    except Exception:  # noqa: BLE001 - an unreadable stream simply disables the fallback
+        return None
+
+
+def _operand_text(value):
+    if isinstance(value, bytes):
+        try:
+            return value.decode('ASCII')
+        except Exception:
+            return None
+    if isinstance(value, str):
+        return value or None
+    return None
 
 TID_NULL = 0
 TID_BOOLEAN = 1
@@ -833,89 +859,22 @@ class workspace(object):
       rt.append(self.work[shuflist[i]])
     self.work=rt
   def sbox(self,table,matrix,skplist=[]): #table is list of 4-byte integers
-    offset=0
-    nwork=list(self.work)
-    wo=0
-    toff=0
-    while offset<0x6000:
-      uv5=table[toff+nwork[wo+0]]
-      uv1=table[toff+nwork[wo+1]+0x100]
-      uv2=table[toff+nwork[wo+2]+0x200]
-      uv3=table[toff+nwork[wo+3]+0x300]
-      moff=0
-      if 0 in skplist:
-        moff+=0x400
-      else:
-        nib1=matrix[moff+offset+(uv1>>0x1c)|( (uv5>>0x18)&0xf0)]
-        moff+=0x100
-        nib2=matrix[moff+offset+(uv3>>0x1c)|( (uv2>>0x18)&0xf0)]
-        moff+=0x100
-        nib3=matrix[moff+offset+((uv1>>0x18)&0xf) |( (uv5>>0x14)&0xf0)]
-        moff+=0x100
-        nib4=matrix[moff+offset+((uv3>>0x18)&0xf) |( (uv2>>0x14)&0xf0)]
-        moff+=0x100
-      rnib1=matrix[moff+offset+nib1*0x10+nib2]
-      moff+=0x100
-      rnib2=matrix[moff+offset+nib3*0x10+nib4]
-      moff+=0x100
-      nwork[wo+0]=rnib1*0x10+rnib2
-      if 1 in skplist:
-        moff+=0x400
-      else:
-        nib1=matrix[moff+offset+((uv1>>0x14)&0xf)|( (uv5>>0x10)&0xf0)]
-        moff+=0x100
-        nib2=matrix[moff+offset+((uv3>>0x14)&0xf)|( (uv2>>0x10)&0xf0)]
-        moff+=0x100
-        nib3=matrix[moff+offset+((uv1>>0x10)&0xf) |( (uv5>>0xc)&0xf0)]
-        moff+=0x100
-        nib4=matrix[moff+offset+((uv3>>0x10)&0xf) |( (uv2>>0xc)&0xf0)]
-        moff+=0x100
-
-      rnib1=matrix[moff+offset+nib1*0x10+nib2]
-      moff+=0x100
-      rnib2=matrix[moff+offset+nib3*0x10+nib4]
-      moff+=0x100
-      nwork[wo+1]=rnib1*0x10+rnib2
-      if 2 in skplist:
-        moff+=0x400
-      else:
-        nib1=matrix[moff+offset+((uv1>>0xc)&0xf)|( (uv5>>0x8)&0xf0)]
-        moff+=0x100
-        nib2=matrix[moff+offset+((uv3>>0xc)&0xf)|( (uv2>>0x8)&0xf0)]
-        moff+=0x100
-        nib3=matrix[moff+offset+((uv1>>0x8)&0xf) |( (uv5>>0x4)&0xf0)]
-        moff+=0x100
-        nib4=matrix[moff+offset+((uv3>>0x8)&0xf) |( (uv2>>0x4)&0xf0)]
-        moff+=0x100
-      rnib1=matrix[moff+offset+nib1*0x10+nib2]
-      moff+=0x100
-      rnib2=matrix[moff+offset+nib3*0x10+nib4]
-      moff+=0x100
-      nwork[wo+2]=rnib1*0x10+rnib2
-      if 3 in skplist:
-        moff+=0x400
-      else:
-        nib1=matrix[moff+offset+((uv1>>0x4)&0xf)|( (uv5)&0xf0)]
-        moff+=0x100
-        nib2=matrix[moff+offset+((uv3>>0x4)&0xf)|( (uv2)&0xf0)]
-        moff+=0x100
-        nib3=matrix[moff+offset+((uv1)&0xf)|( (uv5<<4)&0xf0) ]
-        moff+=0x100
-        nib4=matrix[moff+offset+((uv3)&0xf)|( (uv2<<4)&0xf0) ]
-        moff+=0x100
-      ##############
-      rnib1=matrix[moff+offset+nib1*0x10+nib2]
-      moff+=0x100
-      rnib2=matrix[moff+offset+nib3*0x10+nib4]
-      moff+=0x100
-      nwork[wo+3]=rnib1*0x10+rnib2
-      offset = offset + 0x1800
-      wo+=4
-      toff+=0x400
+    nwork=[0]*16
+    for col in range(4):
+      wo=col*4
+      toff=col*0x400
+      uv=(
+        table[toff+self.work[wo]]
+        ^table[toff+0x100+self.work[wo+1]]
+        ^table[toff+0x200+self.work[wo+2]]
+        ^table[toff+0x300+self.work[wo+3]]
+      )
+      prev=0
+      for lane in range(4):
+        if lane not in skplist:
+          prev=(uv>>(24-8*lane))&0xff
+        nwork[wo+lane]=prev
     self.work=nwork
-  def lookup(self,ltable):
-    for a in range(len(self.work)):
-      self.work[a]=ltable[a]
   def exlookup(self,ltable):
     lookoffs=0
     for a in range(len(self.work)):
@@ -928,238 +887,50 @@ class workspace(object):
       out.append(self.work[a])
     return out
 
-def process_V9708(st):
-  #e9c457a7dae6aa24365e7ef219b934b17ed58ee7d5329343fc3aea7860ed51f9a73de14351c9
-  ws=workspace([0x11]*16)
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.shuffle(repl)
-    ws.sbox(d0x6a06ea70,d0x6a0dab50)
-    ws.sbox(d0x6a073a70,d0x6a0dab50)
-    ws.shuffle(repl)
-    ws.exlookup(d0x6a072a70)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16;
-  return bytes(out)
+_V4DIGIT_REPL = [0, 5, 10, 15, 4, 9, 14, 3, 8, 13, 2, 7, 12, 1, 6, 11]
 
-def process_V1031(st):
-  #d53efea7fdd0fda3e1e0ebbae87cad0e8f5ef413c471c3ae81f39222a9ec8b8ed582e045918c
-  ws=workspace([0x06,0x18,0x60,0x68,0x3b,0x62,0x3e,0x3c,0x06,0x50,0x71,0x52,0x02,0x5a,0x63,0x03])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0797c0,d0x6a0dab50,[3])
-    ws.sbox(d0x6a07e7c0,d0x6a0dab50,[3])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0797c0,d0x6a0dab50,[3])
-    ws.sbox(d0x6a07e7c0,d0x6a0dab50,[3])
-    ws.exlookup(d0x6a07d7c0)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-    #break
-  return bytes(out)
 
-def process_V2069(st):
-  #8e6196d754a304c9354e91b5d79f07b048026d31c7373a8691e513f2c802c706742731caa858
-  ws=workspace([0x79,0x0d,0x12,0x08,0x66,0x77,0x2e,0x5b,0x02,0x09,0x0a,0x13,0x11,0x0c,0x11,0x62])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.sbox(d0x6a084498,d0x6a0dab50,[2])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a089498,d0x6a0dab50,[2])
-    ws.sbox(d0x6a089498,d0x6a0dab50,[2])
-    ws.sbox(d0x6a084498,d0x6a0dab50,[2])
-    ws.shuffle(repl)
-    ws.exlookup(d0x6a088498)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
+def _run_v4digit(st, seed16, t_a, t_y, t_b, skplist, ops):
+  ws = workspace(list(seed16))
+  out = []
+  for sto in range(0, len(st), 16):
+    for op in ops:
+      if op == "S":
+        ws.shuffle(_V4DIGIT_REPL)
+      else:
+        ws.sbox(t_a if op == "A" else t_b, d0x6a0dab50, skplist)
+    ws.exlookup(t_y)
+    out += ws.mask(st[sto:sto + 16])
   return bytes(out)
 
 
-def process_V9041(st):
-  #11f7db074b24e560dfa6fae3252b383c3b936e51f6ded570dc936cb1da9f4fc4a97ec686e7d8
-  ws=workspace([0x49,0x0b,0x0e,0x3b,0x19,0x1a,0x49,0x61,0x10,0x73,0x19,0x67,0x5c,0x1b,0x11,0x21])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.sbox(d0x6a094170,d0x6a0dab50,[1])
-    ws.shuffle(repl)
-    ws.shuffle(repl)
-    ws.sbox(d0x6a08f170,d0x6a0dab50,[1])
-    ws.sbox(d0x6a08f170,d0x6a0dab50,[1])
-    ws.sbox(d0x6a094170,d0x6a0dab50,[1])
-
-    ws.exlookup(d0x6a093170)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-    #break
-  return bytes(out)
-
-def process_V3646(st):
-  #d468aa362b44479282291983243b38197c4b4aa24c2c58e62c76ec4b81e08556ca0c54301664
-  ws=workspace([0x0a,0x36,0x3e,0x29,0x4e,0x02,0x18,0x38,0x01,0x36,0x73,0x13,0x14,0x1b,0x16,0x6a])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.shuffle(repl)
-    ws.sbox(d0x6a099e48,d0x6a0dab50,[2,3])
-    ws.sbox(d0x6a09ee48,d0x6a0dab50,[2,3])
-    ws.sbox(d0x6a09ee48,d0x6a0dab50,[2,3])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a099e48,d0x6a0dab50,[2,3])
-    ws.sbox(d0x6a099e48,d0x6a0dab50,[2,3])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a09ee48,d0x6a0dab50,[2,3])
-    ws.exlookup(d0x6a09de48)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-  return bytes(out)
-
-
-def process_V6052(st):
-  #d683c8c4e4f46ae45812196f37e218eabce0fae08994f25fabb01d3e569b8bf3866b99d36f57
-  ws=workspace([0x5f,0x0d,0x01,0x12,0x5d,0x5c,0x14,0x2a,0x17,0x69,0x14,0x0d,0x09,0x21,0x1e,0x3b])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0a4b20,d0x6a0dab50,[1,3])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0a4b20,d0x6a0dab50,[1,3])
-    ws.sbox(d0x6a0a9b20,d0x6a0dab50,[1,3])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0a9b20,d0x6a0dab50,[1,3])
-    ws.sbox(d0x6a0a9b20,d0x6a0dab50,[1,3])
-    ws.sbox(d0x6a0a4b20,d0x6a0dab50,[1,3])
-
-    ws.exlookup(d0x6a0a8b20)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-  return bytes(out)
-
-def process_V9479(st):
-  #925635db434bccd3f4791eb87b89d2dfc7c93be06e794744eb9de58e6d721e696980680ab551
-  ws=workspace([0x65,0x1d,0x19,0x7c,0x09,0x79,0x1d,0x69,0x7c,0x4e,0x13,0x0e,0x04,0x1b,0x6a,0x3c ])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.sbox(d0x6a0af7f8,d0x6a0dab50,[1,2,3])
-    ws.sbox(d0x6a0af7f8,d0x6a0dab50,[1,2,3])
-    ws.sbox(d0x6a0b47f8,d0x6a0dab50,[1,2,3])
-    ws.sbox(d0x6a0af7f8,d0x6a0dab50,[1,2,3])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0b47f8,d0x6a0dab50,[1,2,3])
-    ws.shuffle(repl)
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0b47f8,d0x6a0dab50,[1,2,3])
-    ws.exlookup(d0x6a0b37f8)
-
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-  return bytes(out)
-
-def process_V9888(st):
-  #54c470723f8c105ba0186b6319050869de673ce31a5ec15d4439921d4cd05c5e860cb2a41fea
-  ws=workspace([0x3f,0x17,0x79,0x69,0x24,0x6b,0x37,0x50,0x63,0x09,0x45,0x6f,0x0c,0x07,0x07,0x09])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.sbox(d0x6a0ba4d0,d0x6a0dab50,[1,2])
-    ws.sbox(d0x6a0bf4d0,d0x6a0dab50,[1,2])
-    ws.sbox(d0x6a0bf4d0,d0x6a0dab50,[1,2])
-    ws.sbox(d0x6a0ba4d0,d0x6a0dab50,[1,2])
-    ws.shuffle(repl)
-    ws.shuffle(repl)
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0bf4d0,d0x6a0dab50,[1,2])
-    ws.sbox(d0x6a0ba4d0,d0x6a0dab50,[1,2])
-    ws.exlookup(d0x6a0be4d0)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-  return bytes(out)
-
-def process_V4648(st):
-  #705bd4cd8b61d4596ef4ca40774d68e71f1f846c6e94bd23fd26e5c127e0beaa650a50171f1b
-  ws=workspace([0x16,0x2b,0x64,0x62,0x13,0x04,0x18,0x0d,0x63,0x25,0x14,0x17,0x0f,0x13,0x46,0x0c])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.sbox(d0x6a0ca1a8,d0x6a0dab50,[1,3])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0ca1a8,d0x6a0dab50,[1,3])
-    ws.sbox(d0x6a0c51a8,d0x6a0dab50,[1,3])
-    ws.sbox(d0x6a0ca1a8,d0x6a0dab50,[1,3])
-    ws.sbox(d0x6a0c51a8,d0x6a0dab50,[1,3])
-    ws.sbox(d0x6a0c51a8,d0x6a0dab50,[1,3])
-    ws.shuffle(repl)
-    ws.shuffle(repl)
-    ws.exlookup(d0x6a0c91a8)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-  return bytes(out)
-
-def process_V5683(st):
-  #1f5af733423e5104afb9d5594e682ecf839a776257f33747c9beee671c57ab3f84943f69d8fd
-  ws=workspace([0x7c,0x36,0x5c,0x1a,0x0d,0x10,0x0a,0x50,0x07,0x0f,0x75,0x1f,0x09,0x3b,0x0d,0x72])
-  repl=[0,5,10,15,4,9,14,3,8,13,2,7,12,1,6,11]
-  remln=len(st)
-  sto=0
-  out=[]
-  while(remln>0):
-    ws.sbox(d0x6a0d4e80,d0x6a0dab50,[])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0cfe80,d0x6a0dab50,[])
-    ws.sbox(d0x6a0d4e80,d0x6a0dab50,[])
-    ws.sbox(d0x6a0cfe80,d0x6a0dab50,[])
-    ws.sbox(d0x6a0d4e80,d0x6a0dab50,[])
-    ws.shuffle(repl)
-    ws.sbox(d0x6a0cfe80,d0x6a0dab50,[])
-    ws.shuffle(repl)
-    ws.exlookup(d0x6a0d3e80)
-    dat=ws.mask(st[sto:sto+16])
-    out+=dat
-    sto+=16
-    remln-=16
-  return bytes(out)
+#e9c457a7dae6aa24365e7ef219b934b17ed58ee7d5329343fc3aea7860ed51f9a73de14351c9
+#d53efea7fdd0fda3e1e0ebbae87cad0e8f5ef413c471c3ae81f39222a9ec8b8ed582e045918c
+#8e6196d754a304c9354e91b5d79f07b048026d31c7373a8691e513f2c802c706742731caa858
+#11f7db074b24e560dfa6fae3252b383c3b936e51f6ded570dc936cb1da9f4fc4a97ec686e7d8
+#d468aa362b44479282291983243b38197c4b4aa24c2c58e62c76ec4b81e08556ca0c54301664
+#d683c8c4e4f46ae45812196f37e218eabce0fae08994f25fabb01d3e569b8bf3866b99d36f57
+#925635db434bccd3f4791eb87b89d2dfc7c93be06e794744eb9de58e6d721e696980680ab551
+#54c470723f8c105ba0186b6319050869de673ce31a5ec15d4439921d4cd05c5e860cb2a41fea
+#705bd4cd8b61d4596ef4ca40774d68e71f1f846c6e94bd23fd26e5c127e0beaa650a50171f1b
+#1f5af733423e5104afb9d5594e682ecf839a776257f33747c9beee671c57ab3f84943f69d8fd
+_V4DIGIT_SPECS = (
+  (9708, [0x11] * 16, d0x6a06ea70, d0x6a072a70, d0x6a073a70, [], "SABS"),
+  (1031, OBFUSCATION_TABLE["V16"][1][:16], d0x6a0797c0, d0x6a07d7c0, d0x6a07e7c0, [3], "SABSAB"),
+  (2069, OBFUSCATION_TABLE["V17"][1][:16], d0x6a084498, d0x6a088498, d0x6a089498, [2], "ASBBAS"),
+  (9041, OBFUSCATION_TABLE["V18"][1][:16], d0x6a08f170, d0x6a093170, d0x6a094170, [1], "BSSAAB"),
+  (3646, OBFUSCATION_TABLE["V19"][1][:16], d0x6a099e48, d0x6a09de48, d0x6a09ee48, [2, 3], "SABBSAASB"),
+  (6052, OBFUSCATION_TABLE["V20"][1][:16], d0x6a0a4b20, d0x6a0a8b20, d0x6a0a9b20, [1, 3], "SASABSBBA"),
+  (9479, OBFUSCATION_TABLE["V21"][1][:16], d0x6a0af7f8, d0x6a0b37f8, d0x6a0b47f8, [1, 2, 3], "AABASBSSB"),
+  (9888, OBFUSCATION_TABLE["V22"][1][:16], d0x6a0ba4d0, d0x6a0be4d0, d0x6a0bf4d0, [1, 2], "ABBASSSBA"),
+  (4648, OBFUSCATION_TABLE["V23"][1][:16], d0x6a0c51a8, d0x6a0c91a8, d0x6a0ca1a8, [1, 3], "BSBABAASS"),
+  (5683, OBFUSCATION_TABLE["V24"][1][:16], d0x6a0cfe80, d0x6a0d3e80, d0x6a0d4e80, [], "BSABABSAS"),
+)
+_V4DIGIT_FUNCS = []
+for _tag, *_spec in _V4DIGIT_SPECS:
+  _fn = lambda st, _s=_spec: _run_v4digit(st, *_s)
+  globals()["process_V%d" % _tag] = _fn
+  _V4DIGIT_FUNCS.append(_fn)
 
 
 # def a2hex(arr):
@@ -1179,130 +950,153 @@ def process_V5683(st):
 
 
 
-# obfuscate shared secret according to the VoucherEnvelope version
-def obfuscate(secret, version):
+def _obfuscate_common(secret, version, permute_fn, first_half=True):
     if version == 1:  # v1 does not use obfuscation
         return secret
-
-    magic, word = OBFUSCATION_TABLE.get("V%d" % version,(1,b"unknown"))
-
+    magic, word = OBFUSCATION_TABLE.get("V%d" % version, (1, b"unknown"))
     # extend secret so that its length is divisible by the magic number
     if len(secret) % magic != 0:
         secret = secret + b'\x00' * (magic - len(secret) % magic)
-
-    secret = bytearray(secret)
-
-    obfuscated = bytearray(len(secret))
-    wordhash = bytearray(hashlib.sha256(word).digest())
-
+    digest = hashlib.sha256(word).digest()
+    wordhash = digest[:16] if first_half else digest[16:]
+    shuffled = permute_fn(bytearray(secret), magic)
     # shuffle secret and xor it with the first half of the word hash
-    for i in range(0, len(secret)):
-        index = i // (len(secret) // magic) + magic * (i % (len(secret) // magic))
-        obfuscated[index] = secret[i] ^ wordhash[index % 16]
+    return bytearray(shuffled[i] ^ wordhash[i % 16] for i in range(len(shuffled)))
 
-    return obfuscated
 
+def _scramble1(st, magic):
+    ret = bytearray(len(st))
+    stride = len(st) // magic
+    for i, b in enumerate(st):
+        ret[i // stride + magic * (i % stride)] = b
+    return ret
+
+
+# obfuscate shared secret according to the VoucherEnvelope version
+def obfuscate(secret, version):
+    return _obfuscate_common(secret, version, _scramble1, True)
 
 
 # scramble() and obfuscate2() from https://github.com/andrewc12/DeDRM_tools/commit/d9233d61f00d4484235863969919059f4d0b2057
-
-def scramble(st,magic):
-    ret=bytearray(len(st))
-    padlen=len(st)
-    for counter in range(len(st)):
-        ivar2=(padlen//2)-2*(counter%magic)+magic+counter-1
-        ret[ivar2%padlen]=st[counter]
+def scramble(st, magic):
+    ret = bytearray(len(st))
+    padlen = len(st)
+    for counter in range(padlen):
+        ivar2 = (padlen // 2) - 2 * (counter % magic) + magic + counter - 1
+        ret[ivar2 % padlen] = st[counter]
     return ret
 
 
 def obfuscate2(secret, version):
-    if version == 1:  # v1 does not use obfuscation
-        return secret
-    magic, word = OBFUSCATION_TABLE.get("V%d" % version,(1,b"unknown"))
-    # extend secret so that its length is divisible by the magic number
-    if len(secret) % magic != 0:
-        secret = secret + b'\x00' * (magic - len(secret) % magic)
-    obfuscated = bytearray(len(secret))
-    wordhash = bytearray(hashlib.sha256(word).digest()[16:])
-    #print(wordhash.hex())
-    shuffled = bytearray(scramble(secret,magic))
-    for i in range(0, len(secret)):
-        obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
-    return obfuscated
+    return _obfuscate_common(secret, version, scramble, False)
+
 
 # scramble3() and obfuscate3() from https://github.com/Satsuoni/DeDRM_tools/commit/da6b6a0c911b6d45fe1b13042b690daebc1cc22f
-
-def scramble3(st,magic):
-  ret=bytearray(len(st))
-  padlen=len(st)
-  divs = padlen // magic
-  cntr = 0
-  iVar6 = 0
-  offset = 0
-  if (0 < ((magic - 1) + divs)):
-    while True:
-      if (offset & 1) == 0 :
-        uVar4 = divs - 1
-        if offset < divs:
-          iVar3 = 0
-          uVar4 = offset
+def scramble3(st, magic):
+    padlen = len(st)
+    ret = bytearray(padlen)
+    divs = padlen // magic
+    cntr = 0
+    for offset in range(magic - 1 + divs):
+        if (offset & 1) == 0:
+            r, c, dr, dc = min(offset, divs - 1), max(0, offset - divs + 1), -1, 1
         else:
-          iVar3 = (offset - divs) + 1
-        if uVar4>=0:
-          iVar5 = uVar4 * magic
-          index =  ((padlen - 1) - cntr)
-          while True:
-            if (magic <= iVar3): break
-            ret[index] = st[iVar3 + iVar5]
-            iVar3 = iVar3 + 1
-            cntr = cntr + 1
-            uVar4 = uVar4 - 1
-            iVar5 = iVar5 - magic
-            index -= 1
-            if uVar4<=-1: break
-      else:
-        if (offset < magic):
-          iVar3 = 0
-        else :
-          iVar3 = (offset - magic) + 1
-        if (iVar3 < divs):
-          uVar4 = offset
-          if (magic <= offset):
-            uVar4 = magic - 1
+            r, c, dr, dc = max(0, offset - magic + 1), min(offset, magic - 1), 1, -1
+        while 0 <= r < divs and 0 <= c < magic:
+            ret[padlen - 1 - cntr] = st[r * magic + c]
+            r += dr
+            c += dc
+            cntr += 1
+    return ret
 
-          index = ((padlen - 1) - cntr)
-          iVar5 = iVar3 * magic
-          while True:
-            if (uVar4 < 0) : break
-            iVar3 += 1
-            ret[index] = st[uVar4 + iVar5]
-            uVar4 -= 1
-            index=index-1
-            iVar5 = iVar5 + magic;
-            cntr += 1;
-            if iVar3>=divs: break
-      offset = offset + 1
-      if offset >= ((magic - 1) + divs) :break
-  return ret
 
 #not sure if the third variant is used anywhere, but it is in Kindle, so I tried to add it
+#secret = bytearray(secret)
+#print(wordhash.hex())
+#print(shuffled)
 def obfuscate3(secret, version):
-    if version == 1:  # v1 does not use obfuscation
+    return _obfuscate_common(secret, version, scramble3, True)
+
+
+def obfuscate_legacy_xor(secret, version, first_half=True):
+    """16-byte repeating SHA-256 pad, not permuted."""
+    if not secret or version == 1:
         return secret
-    magic, word = OBFUSCATION_TABLE.get("V%d" % version,(1,b"unknown"))
-    # extend secret so that its length is divisible by the magic number
-    if len(secret) % magic != 0:
-        secret = secret + b'\x00' * (magic - len(secret) % magic)
-    #secret = bytearray(secret)
-    obfuscated = bytearray(len(secret))
-    wordhash = bytearray(hashlib.sha256(word).digest())
-    #print(wordhash.hex())
-    shuffled=bytearray(scramble3(secret,magic))
-    #print(shuffled)
-    # shuffle secret and xor it with the first half of the word hash
-    for i in range(0, len(secret)):
-        obfuscated[i] = shuffled[i] ^ wordhash[i % 16]
-    return obfuscated
+    _magic, word = OBFUSCATION_TABLE.get("V%d" % version, (1, None))
+    if not word:
+        return secret
+    digest = hashlib.sha256(word).digest()
+    pad = digest[:16] if first_half else digest[16:32]
+    return bytes(byte ^ pad[index & 0x0F] for index, byte in enumerate(bytearray(secret)))
+
+
+PLAINTEXT_TYPES = ("com.amazon.drm.PlainText@1.0", "com.amazon.drm.PlainText@2.0")
+PLAINTEXT_SIDS = (0x29, 0x45, 0x46)
+KEY_RECORD_TYPES = ("com.amazon.drm.SecretKey@1.0",) + PLAINTEXT_TYPES
+
+
+def _is_plaintext_node(parser):
+    return parser.gettypename() in PLAINTEXT_TYPES or any(
+        ann in PLAINTEXT_SIDS for ann in getattr(parser, "annotations", ())
+    )
+
+
+def _extract_key_from_ion_bytes(raw_bytes, strict=False):
+    # 16-byte content key out of a KeySet/SecretKey/PlainText@1.0|2.0 Ion stream
+    if not raw_bytes or not isinstance(raw_bytes, (bytes, bytearray)):
+        return None
+    raw_bytes = bytes(raw_bytes)
+    if not raw_bytes.startswith(b"\xe0\x01\x00\xea"):
+        return None
+    try:
+        parser = BinaryIonParser(BytesIO(raw_bytes))
+        addprottable(parser)
+    except Exception:
+        return None
+
+    def _walk(in_key_record=False, in_keyset=False, in_secret_key=False):
+        found = None
+        while parser.hasnext():
+            t = parser.next()
+            tname = parser.gettypename()
+            fname = parser.getfieldname()
+            if in_secret_key and strict:
+                if fname == "algorithm":
+                    _assert(parser.stringvalue() == "AES", "Unknown cipher algorithm: %s" % parser.stringvalue())
+                elif fname == "format":
+                    _assert(parser.stringvalue() == "RAW", "Unknown key format: %s" % parser.stringvalue())
+            is_secret_key = in_secret_key or (tname == "com.amazon.drm.SecretKey@1.0")
+            is_key_node = in_key_record or is_secret_key or (tname in KEY_RECORD_TYPES) or _is_plaintext_node(parser)
+            is_ks_node = in_keyset or (tname == "com.amazon.drm.KeySet@1.0")
+            if t in (TID_BLOB, TID_CLOB):
+                blob = parser.lobvalue()
+                if not blob:
+                    continue
+                if blob.startswith(b"\xe0\x01\x00\xea"):
+                    nested = _extract_key_from_ion_bytes(blob, strict=strict)
+                    if nested is not None:
+                        return nested
+                if (len(blob) == 16 or (strict and is_key_node)) and (
+                    is_key_node or (is_ks_node and fname in ("encoded", "data", "cipher_text"))
+                ):
+                    if in_secret_key and strict:
+                        found = bytes(blob)
+                    else:
+                        return bytes(blob)
+            elif t in (TID_STRUCT, TID_LIST, TID_SEXP):
+                parser.stepin()
+                sub = _walk(is_key_node, is_ks_node, is_secret_key)
+                parser.stepout()
+                if sub is not None:
+                    return sub
+        return found
+
+    if strict:
+        return _walk(False, False, False)
+    try:
+        return _walk(False, False, False)
+    except Exception:
+        return None
 
 # VoucherEnvelope versions from 10001 on do not derive the voucher key by permuting the
 # shared secret string. They hand the lock parameter values to a routine that returns both
@@ -1365,21 +1159,47 @@ MESSAGE_ALPHABET_D = ".e-Jjh0RBjdJhjB1VdDuLj7iAnuDm1T6SECX"
 # permuted by SOURCE_ROUNDS swaps each driven by one byte of the id. MESSAGE_STREAM is a
 # fixed 36 character run of the library's, holding next to the message builder's own
 # fixed strings, whose 18 pairs decide which 36 of the source's positions are read.
+# [the id laws take any non-empty id, so gating on the prefix would reject one the library reads]
 VOUCHER_ID_PREFIX = b"amzn1.drm-voucher.v1."
 SOURCE_SEED = b"0Aa1Bb2Cc3Dd4Ee5Ff6Gg7Hh-8Ii9JjKkLlMmNnOoPpQqR_rSsTtUuVvWwXxYyZz"
 SOURCE_ROUNDS = 22
 MESSAGE_STREAM = b"dhbi934l3irje98rjnfne949fdnfankANSDW"
 
+
+def _voucher_id_bytes(voucher_id):
+    """The id as bytes, or None when there is no id to read.
+
+    Only an empty id is skipped. The library's id laws fold every character of any non-empty id
+    and nothing in them distinguishes one spelling from another, so gating on the prefix this
+    pipeline expects would build no alphabet and read no row count for an id it would have read.
+    """
+    if isinstance(voucher_id, str):
+        voucher_id = voucher_id.encode('ASCII')
+    if not isinstance(voucher_id, bytes) or not voucher_id:
+        return None
+    return voucher_id
+
 # The device keeps the ACCOUNT_SECRET for its own DRM key derivation wrapped under this
 # key, in a file called acsr. The wrapping key is a firmware constant, not per-device.
 ACSR_WRAP_KEY = b"e35f5062f97cc8b1244f6f1a2414e31c"
 ACSR_WRAP_KEYS = [ACSR_WRAP_KEY] #maybe one day...
+# The two shapes an account secret has once it is out of its wrapping: the 40 character form
+# the app stores, and the 30 bytes a base build's base64 decode turns that form into. The
+# derivation accepts either.
+ACCOUNT_SECRET_LENGTHS = (30, 40)
+
+# Separators a device file or a credential list may put between rotations of one secret.
+_SECRET_SEPARATOR = re.compile(br'[\s,;]+')
+
+
 def drilldown(t):
   """
   take a list of byte-strings, split it further and b64decode until done
   """
   nxt=[]
   for val in t:
+    if not val:
+      continue
     if len(val)<=64:
       nxt.append(val) #should be one of the final values
       continue
@@ -1396,35 +1216,107 @@ def drilldown(t):
       print("Exception for value {} : {}".format(val,e))
   return nxt
 
+def _is_secret_text(value):
+  # one fixed key sometimes hits valid padding by chance, so check the text too
+  if not value:
+    return False
+  return all(0x20 <= byte <= 0x7e for byte in value)
+
+def _is_plain_secret(value):
+  return len(value) in ACCOUNT_SECRET_LENGTHS and _is_secret_text(value)
+
 def try_unwrap_value(val):
-  if len(val)<16 or len(val)%16!=0:
+  """The account secret inside one wrapped value, or None when it is not wrapped.
+
+  The wrapping is a 16 byte IV then AES-CBC ciphertext under the firmware's wrap key, the
+  plaintext PKCS#7 padded. The unpadded result is checked as text too, because the padding
+  alone is a weak check under one fixed key.
+  """
+  if len(val) < 32 or len(val)%16!=0:
     return None
   for key in ACSR_WRAP_KEYS:
-    aes = AES.new(key, AES.MODE_CBC, val[:16])
-    data=aes.decrypt(val[16:])
-    if data[-1]==8:#40-byte secrets only?
-      try:
-        return pkcs7unpad(data, 16)
-      except:
-        return None 
+    try:
+      aes = AES.new(key, AES.MODE_CBC, val[:16])
+      data=aes.decrypt(val[16:])
+      plain = pkcs7unpad(data, 16)
+    except Exception:
+      continue
+    if _is_secret_text(plain):
+      return plain
   return None
+
+def _secret_tokens(value):
+  """The candidate tokens one acsr value holds.
+
+  A value that reads as text is a list: one rotation per line, and the same separators turn up
+  between values copied by hand. One that doesn't is a wrapped secret as it stands -- a 16 byte
+  IV and its ciphertext hold bytes that look like separators -- so it's kept whole.
+  """
+  if not value:
+    return []
+  if _looks_like_text(value):
+    return [token for token in _SECRET_SEPARATOR.split(value) if token]
+  return [value]
+
+def _looks_like_text(value):
+  if not value:
+    return False
+  return all(0x20 <= byte <= 0x7e or byte in (0x09, 0x0a, 0x0d) for byte in value)
+
+def _secrets_from_token(token):
+  """Every account secret one token stands for, narrowest variant first.
+
+  The value may be one the unwrap takes, may be the secret as it stands, or one base64 layer
+  short of either. Undecoded before decoded: a bare hex secret is valid base64 too, and would
+  decode into bytes that are neither. A wrapped 30 byte secret is 48 bytes, whose base64 form is
+  exactly the length the splitter treats as final, so that layer comes off here.
+  """
+  for value in drilldown([token]):
+    secret = try_unwrap_value(value)
+    if secret is not None:
+      yield secret
+      continue
+    if _is_plain_secret(value):
+      yield value
+      continue
+    try:
+      decoded = _b64decode_field(value)
+    except Exception:
+      continue
+    if not decoded or decoded == value:
+      continue
+    secret = try_unwrap_value(decoded)
+    if secret is not None:
+      yield secret
+    elif _is_plain_secret(decoded):
+      yield decoded
+
 def unwrap_account_secrets(acsr):
     """Recover the ACCOUNT_SECRET from the device's acsr file contents.
 
     acsr is base64 of base64 of a 16 byte IV followed by the AES-CBC ciphertext. Returns
     the account secret as bytes, ready to be passed to DrmIonVoucher as the secret.
     Odd fact: some acsr have more than one secret! separated by comma. ALso, not all versions have external base64 wrapping for.. reasons? PC one does not. 
+    [the unwrap below also takes one base64 layer and an already unwrapped secret, and splits on
+    whitespace and semicolon as well as comma]
     """
-    if isinstance(acsr, str):
-        acsr = acsr.encode('ASCII')
-    
-    wrapped_list=drilldown([acsr])
+    if isinstance(acsr, (bytes, bytearray, str)):
+        values = [acsr]
+    else:
+        values = list(acsr)
+
+    tokens = []
+    for value in values:
+        if isinstance(value, str):
+            value = value.encode('ASCII')
+        tokens.extend(_secret_tokens(bytes(value)))
+
     secrets=[]
-    for wrapped in wrapped_list:
-      sec=try_unwrap_value(wrapped)
-      if sec is not None:
-        secrets.append(sec)
-    return secrets 
+    for token in tokens:
+        for secret in _secrets_from_token(token):
+            if secret not in secrets:
+                secrets.append(secret)
+    return secrets
     #inner = _b64decode_field(acsr)
     #wrapped = _b64decode_field(inner)
     #_assert(len(wrapped) > 16 and len(wrapped) % 16 == 0,
@@ -1440,6 +1332,78 @@ def _b64decode_field(value):
     alone rather than being a prefix of a longer string.
     """
     return base64.b64decode(b''.join(value.split()))
+
+
+_HEX_CHARS = set("0123456789abcdefABCDEF")
+SERIAL_PREFIX_LENGTHS = (16, 32, 40)
+
+
+def is_serial_id(tok):
+    return (len(tok) == 16 and tok.isalnum()) or (
+        len(tok) in (32, 40) and all(ch in _HEX_CHARS for ch in tok)
+    )
+
+
+def unwrap_secret_token(text, allow_plain=False, unwrap_fn=None):
+    if not text:
+        return []
+    if unwrap_fn is None:
+        unwrap_fn = unwrap_account_secrets
+    if (
+        allow_plain
+        and len(text) in ACCOUNT_SECRET_LENGTHS
+        and all(0x20 <= ord(ch) <= 0x7E for ch in text)
+        and not text.startswith("1+")
+        and ":" not in text
+        and "+" not in text
+    ):
+        return [text]
+    tries = []
+    if text.startswith("1+") and len(text) > 2:
+        tries.append(text[2:])
+    if allow_plain or (len(text) >= 44 and len(text) not in (46, 56, 62, 70, 72, 80)):
+        tries.append(text)
+    out = []
+    for cand in tries:
+        try:
+            unwrapped = unwrap_fn(cand)
+        except Exception:
+            unwrapped = []
+        for item in unwrapped:
+            if isinstance(item, (bytes, bytearray)):
+                try:
+                    item = bytes(item).decode("ASCII")
+                except Exception:
+                    continue
+            item = str(item).strip()
+            if len(item) in ACCOUNT_SECRET_LENGTHS and item not in out:
+                out.append(item)
+        if out:
+            break
+    return out
+
+
+def split_serial_secret(raw, check_serial=False, concat_plain=False, unwrap_fn=None):
+    for prefix_len in SERIAL_PREFIX_LENGTHS:
+        if len(raw) <= prefix_len:
+            continue
+        ser_part = raw[:prefix_len]
+        if check_serial and not is_serial_id(ser_part):
+            continue
+        if len(raw) > prefix_len + 1 and raw[prefix_len] in (":", "+"):
+            secs = unwrap_secret_token(raw[prefix_len + 1:], allow_plain=True, unwrap_fn=unwrap_fn)
+            if secs:
+                return ser_part, secs
+        rest_part = raw[prefix_len:]
+        if (
+            rest_part.startswith("1+")
+            or (concat_plain and len(rest_part) in ACCOUNT_SECRET_LENGTHS)
+            or (len(rest_part) >= 44 and (concat_plain or len(raw) not in (46, 56, 62, 70, 72, 80)))
+        ):
+            secs = unwrap_secret_token(rest_part, allow_plain=concat_plain, unwrap_fn=unwrap_fn)
+            if secs:
+                return ser_part, secs
+    return None, []
 
 # The key builder flattens the same wrapped lock parameter values into a vector of
 # ((byte << k) ^ xor) % 500, then walks the distinct values in ascending order as moduli.
@@ -1575,9 +1539,8 @@ def obfuscate4_voucher_id(voucher_id, version):
     body's. The result reads neither the account secret nor the client id, so a voucher
     locked this way decrypts without either. Returns None when there is no id to read.
     """
-    if isinstance(voucher_id, str):
-        voucher_id = voucher_id.encode('ASCII')
-    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+    voucher_id = _voucher_id_bytes(voucher_id)
+    if voucher_id is None:
         return None
     xor = _voucher_rows(voucher_id)
     if xor is None:
@@ -1610,19 +1573,49 @@ def _flatten(body, profile=None):
             for k in range(profile.flatten_rows) for byte in body]
 
 
+def _signed_remainder(a, b):
+    """The remainder with the dividend's sign, as the device's integer division gives it.
+
+    Python's % takes the divisor's sign, so it can't express this: -3 % 33 is 30 here and -3 on
+    the device, and the factor scan depends on the difference.
+    """
+    remainder = abs(a) % abs(b)
+    return -remainder if a < 0 else remainder
+
+
+def _signed_gcd(a, b):
+    """The factor scan's Euclidean loop, which can return a negative divisor.
+
+    The device keeps whatever sign its remainder sequence lands on, so a negative result is
+    common and the caller rejects it by testing against one. That rejection has to be
+    reproduced, not repaired: the magnitude admits factors the device never accepts and
+    reorders the rest.
+    """
+    if b == 0:
+        return a
+    previous, current = a, b
+    while True:
+        remainder = _signed_remainder(previous, current)
+        previous = current
+        if remainder == 0:
+            return current
+        current = remainder
+
+
 def _factors(modulus, first_k):
     """The factors a modulus contributes, in the order the device accepts them.
 
     For each k ascending the device takes every e with k^2 == e^2 (mod modulus) whose
     gcd(k - e, modulus) is above one, in the order FACTOR_E lists them, and each distinct
     factor is accepted once per scan.
+    The gcd is the signed one; see _signed_gcd for why the sign decides acceptance.
     """
     accepted = []
     for k in range(first_k, modulus):
         for e in FACTOR_E:
             if (k * k - e * e) % modulus:
                 continue
-            factor = math.gcd(k - e, modulus)
+            factor = _signed_gcd(k - e, modulus)
             if factor > 1 and factor not in accepted:
                 accepted.append(factor)
     return accepted
@@ -1672,9 +1665,10 @@ def _is_account_secret(value):
     The unwrapped secret is 40 lowercase hex characters, and every one of them is also a
     base64 digit, so this shape alone does not say how the value is to be read: that is
     what DerivationProfile.passthrough_hex_secret decides.
+    [the check below takes upper case digits too, so case is not part of the shape]
     """
     return (len(value) == 40
-            and all(c in b'0123456789abcdef' for c in value))
+            and all(c in b'0123456789abcdefABCDEF' for c in value))
 
 
 def _key_body(account_secret, client_id):
@@ -1702,10 +1696,10 @@ def _voucher_alphabet(voucher_id):
     voucher_id is the envelope's voucher id, the string VOUCHER_ID_PREFIX heads. An id
     of any other shape builds nothing, so None tells the caller to fall back to the run
     the profile carries.
+    [any non-empty id builds a run too]
     """
-    if isinstance(voucher_id, str):
-        voucher_id = voucher_id.encode('ASCII')
-    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+    voucher_id = _voucher_id_bytes(voucher_id)
+    if voucher_id is None:
         return None
     source = _voucher_source(voucher_id)
     return bytes(source[i] for i in _message_picks(source)).decode('ASCII')
@@ -1718,10 +1712,10 @@ def _voucher_rows(voucher_id):
     acc = ((c << (c & 1)) ^ acc) % 10, replacing a zero with three; the result is the count.
     An id of any other shape reads no count, so None tells the caller to fall back to the
     counts FLATTEN_ROW_CANDIDATES names.
+    [any non-empty id reads a count]
     """
-    if isinstance(voucher_id, str):
-        voucher_id = voucher_id.encode('ASCII')
-    if not isinstance(voucher_id, bytes) or not voucher_id.startswith(VOUCHER_ID_PREFIX):
+    voucher_id = _voucher_id_bytes(voucher_id)
+    if voucher_id is None:
         return None
     acc = 10
     for byte in voucher_id:
@@ -1757,8 +1751,9 @@ def _voucher_source(voucher_id):
 
 
 def _message_picks(source):
-    """The 36 positions in source the message vector's opening run reads, in order.
-
+    """The 36 positions in source the message vector's opening run reads, in order."""
+    picks = []
+    """
     source is read as an 8 by 8 grid. MESSAGE_STREAM holds 18 character pairs, and for
     each pair the library walks the grid in row order until it has met both of the pair's
     characters, taking the first of each. Those two positions are then mixed into the
@@ -1769,7 +1764,6 @@ def _message_picks(source):
     the end of the grid and both positions fall back to ones read out of the pair's own
     bytes instead.
     """
-    picks = []
     for k in range(0, len(MESSAGE_STREAM), 2):
         first, second = MESSAGE_STREAM[k], MESSAGE_STREAM[k + 1]
         rowa, cola, rowb, colb = _find_pair(source, first, second)
@@ -1901,11 +1895,16 @@ class DrmIonVoucher(object):
     cipheriv = b""
     secretkey = b""
 
-    def __init__(self, voucherenv, dsn, secret,skeylist=None,quiet=False):
+    def __init__(self, voucherenv, dsn, secret,skeylist=None,quiet=False,stage_fallback=True):
         self.dsn, self.secret = dsn, secret
         # Set by a caller that tries several PIDs in a row and prints one summary
         # itself, so that a failure is not reported once per PID.
         self.quiet = quiet
+        # Whether the stages may answer once every candidate this module can build has been
+        # refused. A caller that already ran them, and checked against a page, turns this off.
+        self.stage_fallback = stage_fallback
+        # kept: kfx_stages.classify() reads these bytes, and the parser walks the same stream
+        self.envelope_bytes = _stream_value(voucherenv)
 
         if isinstance(dsn, str):
             self.dsn = dsn.encode('ASCII')
@@ -1920,12 +1919,29 @@ class DrmIonVoucher(object):
         self.skeylist=skeylist
         self.voucher_id=""
         self.license_type="unknown"
+        self.is_plaintext=False
+        self.voucher_bytes=b""
         self.envelope = BinaryIonParser(voucherenv)
         addprottable(self.envelope)
 
     def decryptvoucher(self):
-        shared = ("PIDv3" + self.encalgorithm + self.enctransformation + self.hashalgorithm).encode('ASCII')
+        if getattr(self, "is_plaintext", False) or _extract_key_from_ion_bytes(self.ciphertext) is not None:
+            pt_key = _extract_key_from_ion_bytes(self.ciphertext)
+            if pt_key is None and getattr(self, "is_plaintext", False):
+                if self.ciphertext and len(self.ciphertext) == 16:
+                    pt_key = bytes(self.ciphertext)
+                else:
+                    pt_key = _extract_key_from_ion_bytes(getattr(self, "voucher_bytes", b""))
+            if pt_key is not None:
+                self.secretkey = pt_key
+                if self.ciphertext and self.ciphertext.startswith(b"\xe0\x01\x00\xea"):
+                    self.drmkey = BinaryIonParser(BytesIO(self.ciphertext))
+                    addprottable(self.drmkey)
+                return
 
+        prefix = ("PIDv3" + self.encalgorithm + self.enctransformation + self.hashalgorithm).encode('ASCII')
+
+        raw_lockparams = list(self.lockparams)
         self.lockparams.sort()
         print("Lock parameters used: {}".format(self.lockparams))
         # Rebuilt rather than appended to, so that a second call cannot double the values.
@@ -1937,20 +1953,44 @@ class DrmIonVoucher(object):
                 value = self.dsn
             else:
                 _assert(False, "Unknown lock parameter: %s" % param)
-            shared += param.encode('ASCII') + value
             self.lockparamvalues[param] = value
 
+        sorted_lockparams = list(self.lockparams)
+        lockparam_orders = [sorted_lockparams]
+        if len(self.lockparams) > 1:
+            if raw_lockparams not in lockparam_orders:
+                lockparam_orders.append(raw_lockparams)
+            rev_lockparams = list(reversed(sorted_lockparams))
+            if rev_lockparams not in lockparam_orders:
+                lockparam_orders.append(rev_lockparams)
 
         # i know that version maps to scramble pretty much 1 to 1, but there was precendent where they changed it, so...
-        sharedsecrets = [obfuscate(shared, self.version),obfuscate2(shared, self.version),obfuscate3(shared, self.version),
-                         process_V9708(shared), process_V1031(shared), process_V2069(shared), process_V9041(shared),
-                         process_V3646(shared), process_V6052(shared), process_V9479(shared), process_V9888(shared),
-                         process_V4648(shared), process_V5683(shared)]
+        sharedsecrets = []
+        seen_secrets = set()
+        for param_order in lockparam_orders:
+            shared = prefix
+            for param in param_order:
+                shared += param.encode('ASCII') + self.lockparamvalues[param]
+            for cand in (
+                obfuscate(shared, self.version),
+                obfuscate2(shared, self.version),
+                obfuscate3(shared, self.version),
+                obfuscate_legacy_xor(shared, self.version, first_half=True),
+                obfuscate_legacy_xor(shared, self.version, first_half=False),
+                shared,
+                *(fn(shared) for fn in _V4DIGIT_FUNCS),
+            ):
+                cand_bytes = bytes(cand)
+                if cand_bytes not in seen_secrets:
+                    seen_secrets.add(cand_bytes)
+                    sharedsecrets.append(cand_bytes)
 
         decrypted=False
         lastexception = None # type: Exception | None
         keycandidates=list(self.keycandidates)
-        keycandidates += [hmac.new(sharedsecret, b"PIDv3", digestmod=hashlib.sha256).digest() for sharedsecret in sharedsecrets]
+        for hmac_msg in (b"PIDv3", b"PIDv3\x00"):
+            for sharedsecret in sharedsecrets:
+                keycandidates.append(hmac.new(sharedsecret, hmac_msg, digestmod=hashlib.sha256).digest())
         if self.version in NEW_KEY_DERIVATION_VERSIONS:
             # Not one of the shared-secret permutations above: the key and the message both
             # come from the version's own routine rather than the shared string assembled
@@ -2003,6 +2043,14 @@ class DrmIonVoucher(object):
             except Exception as ex:
                 lastexception = ex
         if not decrypted:
+            stage_key = self._stage_content_key()
+            if stage_key is not None:
+                # A page key, not a decrypted key set: recorded where the page reader looks,
+                # confirmed by the caller's page walk
+                print("The migrated derivation stages produced this voucher's content key")
+                self.secretkey = stage_key
+                self.drmkey = None
+                return
             if self.quiet:
                 raise lastexception
             print("Tried {0} key candidates for voucher version {1}, none of them worked. "
@@ -2016,26 +2064,51 @@ class DrmIonVoucher(object):
                 return
                  
 
-        self.drmkey.stepin()
-        while self.drmkey.hasnext():
-            self.drmkey.next()
-            if self.drmkey.gettypename() != "com.amazon.drm.SecretKey@1.0":
+        self.secretkey = _extract_key_from_ion_bytes(b, strict=True) or b""
+
+    def _stage_content_key(self):
+        """The content key the stages compute for this envelope, or None.
+
+        Only called once every candidate this module can build has been refused. The import is
+        guarded and happens at call time, so a host without the stage tree behaves as before. An
+        envelope no family claims answers None at once.
+
+        A voucher envelope carries no pages, so there's no page oracle here -- the caller's page
+        reader confirms the key. Empty lock class first, then this voucher's operands.
+        """
+        if not self.stage_fallback or not self.envelope_bytes:
+            return None
+        try:
+            import kfx_stages
+        except Exception:  # noqa: BLE001 - absent stage tree is a supported configuration
+            return None
+        try:
+            family = kfx_stages.classify(self.envelope_bytes)
+        except Exception:  # noqa: BLE001 - unparseable means "no engine here"
+            return None
+        if family is None:
+            return None
+        print("The voucher envelope belongs to the {0} derivation family".format(family))
+        candidates = [{}]
+        credentials = {}
+        client_id = _operand_text(self.dsn)
+        secret = _operand_text(self.secret)
+        if client_id:
+            credentials['client_id'] = [client_id]
+        if secret:
+            credentials['account_secret'] = [secret]
+        if credentials:
+            candidates.append(credentials)
+        for credential_map in candidates:
+            try:
+                key = kfx_stages.derive(family, self.envelope_bytes, credential_map)
+            except Exception:
+                # A law refusing these operands is one answer among several: the next
+                # assignment gets its turn, then the caller's failure handling
                 continue
-
-            self.drmkey.stepin()
-            while self.drmkey.hasnext():
-                self.drmkey.next()
-                if self.drmkey.getfieldname() == "algorithm":
-                    _assert(self.drmkey.stringvalue() == "AES", "Unknown cipher algorithm: %s" % self.drmkey.stringvalue())
-                elif self.drmkey.getfieldname() == "format":
-                    _assert(self.drmkey.stringvalue() == "RAW", "Unknown key format: %s" % self.drmkey.stringvalue())
-                elif self.drmkey.getfieldname() == "encoded":
-                    self.secretkey = self.drmkey.lobvalue()
-
-            self.drmkey.stepout()
-            break
-
-        self.drmkey.stepout()
+            if key and len(key) == 16:
+                return bytes(key)
+        return None
 
     def parse(self):
         self.envelope.reset()
@@ -2051,32 +2124,39 @@ class DrmIonVoucher(object):
             self.envelope.next()
             field = self.envelope.getfieldname()
             if field == "voucher":
-                self.voucher = BinaryIonParser(BytesIO(self.envelope.lobvalue()))
+                self.voucher_bytes = self.envelope.lobvalue()
+                self.voucher = BinaryIonParser(BytesIO(self.voucher_bytes))
                 addprottable(self.voucher)
                 continue
             elif field != "strategy":
                 continue
 
-            _assert(self.envelope.gettypename() == "com.amazon.drm.PIDv3@1.0", "Unknown strategy: %s" % self.envelope.gettypename())
+            strategy_type = self.envelope.gettypename()
+            is_pt_strategy = _is_plaintext_node(self.envelope)
+            _assert(strategy_type == "com.amazon.drm.PIDv3@1.0" or is_pt_strategy,
+                    "Unknown strategy: %s" % strategy_type)
+            if is_pt_strategy:
+                self.is_plaintext = True
 
-            self.envelope.stepin()
-            while self.envelope.hasnext():
-                self.envelope.next()
-                field = self.envelope.getfieldname()
-                if field == "encryption_algorithm":
-                    self.encalgorithm = self.envelope.stringvalue()
-                elif field == "encryption_transformation":
-                    self.enctransformation = self.envelope.stringvalue()
-                elif field == "hashing_algorithm":
-                    self.hashalgorithm = self.envelope.stringvalue()
-                elif field == "lock_parameters":
-                    self.envelope.stepin()
-                    while self.envelope.hasnext():
-                        _assert(self.envelope.next() == TID_STRING, "Expected string list for lock_parameters")
-                        self.lockparams.append(self.envelope.stringvalue())
-                    self.envelope.stepout()
+            if self.envelope.valuetid == TID_STRUCT:
+                self.envelope.stepin()
+                while self.envelope.hasnext():
+                    self.envelope.next()
+                    field = self.envelope.getfieldname()
+                    if field == "encryption_algorithm":
+                        self.encalgorithm = self.envelope.stringvalue()
+                    elif field == "encryption_transformation":
+                        self.enctransformation = self.envelope.stringvalue()
+                    elif field == "hashing_algorithm":
+                        self.hashalgorithm = self.envelope.stringvalue()
+                    elif field == "lock_parameters":
+                        self.envelope.stepin()
+                        while self.envelope.hasnext():
+                            _assert(self.envelope.next() == TID_STRING, "Expected string list for lock_parameters")
+                            self.lockparams.append(self.envelope.stringvalue())
+                        self.envelope.stepout()
 
-            self.envelope.stepout()
+                self.envelope.stepout()
 
         self.parsevoucher()
         if self.skeylist is not None:
@@ -2088,20 +2168,41 @@ class DrmIonVoucher(object):
            
     def parsevoucher(self):
         _assert(self.voucher.hasnext(), "Voucher is empty")
-        _assert(self.voucher.next() == TID_STRUCT and self.voucher.gettypename() == "com.amazon.drm.Voucher@1.0",
-                "Unknown type, expected Voucher")
+        root_tid = self.voucher.next()
+        root_type = self.voucher.gettypename()
+        if _is_plaintext_node(self.voucher):
+            self.is_plaintext = True
+            if root_tid in (TID_BLOB, TID_CLOB):
+                self.ciphertext = self.voucher.lobvalue() or b""
+                return
+            _assert(root_tid == TID_STRUCT, "Unknown type, expected Voucher")
+        else:
+            _assert(root_tid == TID_STRUCT and root_type == "com.amazon.drm.Voucher@1.0",
+                    "Unknown type, expected Voucher")
 
         self.voucher.stepin()
         while self.voucher.hasnext():
-            self.voucher.next()
+            field_tid = self.voucher.next()
+            field_name = self.voucher.getfieldname()
+            field_type = self.voucher.gettypename()
+            is_pt_field = _is_plaintext_node(self.voucher) or field_name in PLAINTEXT_TYPES
 
-            if self.voucher.getfieldname() == "cipher_iv":
+            if field_name == "cipher_iv":
                 self.cipheriv = self.voucher.lobvalue()
-            elif self.voucher.getfieldname() == "cipher_text":
+            elif field_name in ("cipher_text", "data", "encoded"):
+                if field_name in ("data", "encoded") or is_pt_field:
+                    self.is_plaintext = True
                 self.ciphertext = self.voucher.lobvalue()
-            elif self.voucher.getfieldname() == "id":
+            elif field_name == "id":
                 self.voucher_id = self.voucher.stringvalue()
-            elif self.voucher.getfieldname() == "license":
+            elif field_name == "lock_parameters":
+                if not self.lockparams:
+                    self.voucher.stepin()
+                    while self.voucher.hasnext():
+                        _assert(self.voucher.next() == TID_STRING, "Expected string list for lock_parameters")
+                        self.lockparams.append(self.voucher.stringvalue())
+                    self.voucher.stepout()
+            elif field_name == "license":
                 if (self.voucher.gettypename() != "com.amazon.drm.License@1.0"):
                   print("Unknown license: %s" % self.voucher.gettypename())
                   continue
@@ -2111,6 +2212,21 @@ class DrmIonVoucher(object):
                     if self.voucher.getfieldname() == "license_type":
                         self.license_type = self.voucher.stringvalue()
                 self.voucher.stepout()
+            elif is_pt_field:
+                self.is_plaintext = True
+                if field_tid in (TID_BLOB, TID_CLOB):
+                    if not self.ciphertext:
+                        self.ciphertext = self.voucher.lobvalue()
+                elif field_tid == TID_STRUCT:
+                    self.voucher.stepin()
+                    while self.voucher.hasnext():
+                        sub_tid = self.voucher.next()
+                        sub_name = self.voucher.getfieldname()
+                        if sub_tid in (TID_BLOB, TID_CLOB) and sub_name in ("data", "encoded", "cipher_text", ""):
+                            blob = self.voucher.lobvalue()
+                            if blob and not self.ciphertext:
+                                self.ciphertext = blob
+                    self.voucher.stepout()
 
     def printenvelope(self, lst):
         self.envelope.print_(lst)
@@ -2120,7 +2236,12 @@ class DrmIonVoucher(object):
             self.parse()
         if self.drmkey is None:
             self.decryptvoucher()
-
+        if self.drmkey is None:
+            # A key candidate answered, or the stages did: both leave the key set unopened, so
+            # there's no document to print
+            print("No decrypted key set is available for this voucher; the content key was "
+                  "taken from a key candidate.")
+            return
         self.drmkey.print_(lst)
 
     def printvoucher(self, lst):

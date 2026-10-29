@@ -155,7 +155,7 @@ class DeDRM(FileTypePlugin):
     version                 = PLUGIN_VERSION_TUPLE
     #minimum_calibre_version = (5, 0, 0)  # Python 3.
     minimum_calibre_version = (2, 0, 0)  # Needs Calibre 1.0 minimum. 1.X untested.
-    file_types              = set(['epub','pdf','pdb','prc','mobi','pobi','azw','azw1','azw3','azw4','azw8','tpz','kfx','kfx-zip'])
+    file_types              = set(['epub','pdf','pdb','prc','mobi','pobi','azw','azw1','azw3','azw4','azw8','azw9','tpz','kfx','kfx-zip'])
     on_import               = True
     on_preprocess           = True
     priority                = 600
@@ -1032,9 +1032,26 @@ class DeDRM(FileTypePlugin):
         self.starttime = time.time()
 
         booktype = os.path.splitext(path_to_ebook)[1].lower()[1:]
-        if booktype in ['prc','mobi','pobi','azw','azw1','azw3','azw4','tpz','kfx-zip']:
+        # no extension, so the shape comes from the file: an export leaves the
+        # fragment database bare, voucher beside it
+        relational_container = utilities.is_relational_container(path_to_ebook)
+        if booktype in ['prc','mobi','pobi','azw','azw1','azw3','azw4','azw8','azw9','tpz','kfx','kfx-zip'] or relational_container:
             # Kindle/Mobipocket
-            decrypted_ebook = self.KindleMobiDecrypt(path_to_ebook)
+            # kfx, azw8 and azw9 are in file_types, so a bare one must land here; left
+            # out, it hit "Unknown booktype" and came back unchanged. azw9 is the
+            # resource container beside the main one; the handler decides package vs
+            # DRMION/voucher
+            try:
+                decrypted_ebook = self.KindleMobiDecrypt(path_to_ebook)
+            except Exception as e:
+                if booktype not in ('kfx', 'azw8', 'azw9') and not relational_container:
+                    raise
+                # a bare container needn't be a shape this handler reads; back
+                # unchanged beats a failed import, since it already said why
+                print("{0} v{1}: The KFX handler could not decrypt this {2} file ({3}). "
+                      "Passing it back to calibre unchanged.".format(
+                          PLUGIN_NAME, PLUGIN_VERSION, booktype, e))
+                return path_to_ebook
         elif booktype == 'pdb':
             # eReader
             decrypted_ebook = self.eReaderDecrypt(path_to_ebook)

@@ -968,14 +968,18 @@ def scan_for_name(nm,book_root):
     except:
       print("No MTP storages found")
       storages=[]
-    fdata=None
-    for  storage in storages:
-      for pth in pths:
-        file_id=storage.find_path(parts)
-        if file_id is not None:
-          data = BytesIO()
-          mtp_device.get_mtp_file(file_id, data)
-          return data.getvalue()
+    # unwalkable storage isn't fatal: the mounted-filesystem search below is the
+    # fallback, so the try spans the walk
+    try:
+      for storage in storages:
+        for pth in pths:
+          file_id=storage.find_path(pth)
+          if file_id is not None:
+            data = BytesIO()
+            mtp_device.get_mtp_file(file_id, data)
+            return data.getvalue()
+    except Exception as ex:
+      print("MTP device-secret lookup failed: {0}: {1}".format(type(ex).__name__, ex))
   candidates=["../","../..","../../.."]
   try:
     from calibre.constants import config_dir
