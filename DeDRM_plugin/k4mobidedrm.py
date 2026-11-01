@@ -153,13 +153,27 @@ def try_dehex(val):
     return bytearray.fromhex(val).decode("ASCII")
   except:
     return None
+# bytes would raise TypeError in the serial+secret concat; None skips just that value
+def secret_text(value):
+  if isinstance(value, bytes):
+    try:
+      return value.decode("ASCII")
+    except Exception:
+      return None
+  if isinstance(value, str):
+    return value
+  return None
 def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime = time.time(),skeyfile=None, remove_watermarks=True,original_path=None):
     # handle the obvious cases at the beginning
     if not os.path.isfile(infile):
         raise DrmException("Input file does not exist.")
 
     mobi = True
-    magic8 = open(infile,'rb').read(8)
+    # ctx manager so the handle closes; 16 bytes: the container signature runs past
+    # the 8 the magics below need
+    with open(infile,'rb') as header_file:
+        magic16 = header_file.read(16)
+    magic8 = magic16[:8]
     if magic8 == b'\xeaDRMION\xee':
         raise DrmException("The .kfx DRMION file cannot be decrypted by itself. A .kfx-zip archive containing a DRM voucher is required.")
 
@@ -167,7 +181,11 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
     if magic3 == b'TPZ':
         mobi = False
 
-    if magic8[:4] == b'PK\x03\x04':
+    if magic16.startswith(kfxdedrm.RELATIONAL_CONTAINER_MAGIC):
+        # bare fragment database, no archive: its own book class, since the output
+        # is one container image, not an archive
+        mb = kfxdedrm.KFXContainerBook(infile,skeyfile,serials,original_path=original_path)
+    elif magic8[:4] == b'PK\x03\x04':
         mb = kfxdedrm.KFXZipBook(infile,skeyfile,serials,original_path=original_path)
     elif mobi:
         mb = mobidedrm.MobiBook(infile, remove_watermarks)
@@ -181,19 +199,49 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
         print("Decrypting {0} ebook.".format(mb.getBookType()))
 
     # copy list of pids
-    totalpids = list(pids)
+    pids = list(pids)
+    serials = [
+        (s.decode('utf-8', 'ignore') if isinstance(s, (bytes, bytearray)) else str(s)).strip()
+        for s in serials
+        if s is not None and (s.decode('utf-8', 'ignore') if isinstance(s, (bytes, bytearray)) else str(s)).strip()
+    ]
     # extend list of serials with serials from android databases
     for aFile in androidFiles:
-        serials.extend(androidkindlekey.get_serials(aFile))
+        for s in androidkindlekey.get_serials(aFile):
+            s_str = (s.decode('utf-8', 'ignore') if isinstance(s, (bytes, bytearray)) else str(s)).strip()
+            if s_str and s_str not in serials:
+                serials.append(s_str)
+
+    if hasattr(mb, 'serials') and isinstance(mb.serials, list):
+        mb.serials = list(serials)
+
+    expanded_pids = kfxdedrm._expand_totalpids(pids, serials, unwrap_fn=unwrap_account_secrets)
+
     # extend PID list with book-specific PIDs from seriala and kDatabases
+    # pids feed this list too, not just serials
     md1, md2 = mb.getPIDMetaInfo()
-    totalpids.extend(kgenpids.getPidList(md1, md2, serials, kDatabases))
+    # KFX books give (None, None) and take the else path
+    if md1 is not None:
+        totalpids = [
+            p for p in expanded_pids
+            if len(p) in (8, 10)
+        ]
+        extra_serials = list(serials)
+        for p in expanded_pids:
+            if p and len(p) not in (8, 10) and p not in extra_serials:
+                extra_serials.append(p)
+        totalpids.extend(kgenpids.getPidList(md1, md2, extra_serials, kDatabases))
+    else:
+        totalpids = list(expanded_pids)
+        totalpids.extend(kgenpids.getPidList(md1, md2, serials, kDatabases))
     
     #let us add pids from k4i, just in case...
     k4i_serials=set()
     k4i_secrets=set()
     accepted_dsn_lengths=[0,16,32,40]
-    accepted_secret_lengths=[0,40]
+    # stored form is 40, the derivation's base64 decode yields 30; both work, so
+    # neither is dropped
+    accepted_secret_lengths=[0,30,40]
     
     for _,db in kDatabases:
       dsns=[db.get("DSN",None)]
@@ -215,20 +263,26 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
       for secr in secrets:
         if secr is None:
           continue 
-        if len(secr) in accepted_secret_lengths:
-          k4i_secrets.add(dsn)
+        # the secret, not the identifier from the loop above: a 30 or 40 char app-db
+        # secret is its own candidate; an identifier would lose it and put a serial in
+        # the cross product
+        text = secret_text(secr)
+        if text is not None and len(text) in accepted_secret_lengths:
+          k4i_secrets.add(text)
         uhx=try_dehex(secr)
         if uhx is not None and len(uhx) in accepted_secret_lengths:
           k4i_secrets.add(uhx)
         vals=unwrap_account_secrets(secr)
         if vals is not None:
           for s in vals:
-            if len(s) in accepted_secret_lengths:
-              k4i_secrets.add(s)
+            text = secret_text(s)
+            if text is not None and len(text) in accepted_secret_lengths:
+              k4i_secrets.add(text)
     print("Adding {} serials and {} secrets from k4i files".format(len(k4i_serials),len(k4i_secrets)))
-    for dsn in k4i_serials:
-      for sec in  k4i_secrets:
-        totalpids.append(dsn+sec)
+    if magic16.startswith(kfxdedrm.RELATIONAL_CONTAINER_MAGIC) or magic8[:4] == b'PK\x03\x04':
+      for dsn in k4i_serials:
+        for sec in  k4i_secrets:
+          totalpids.append(dsn+sec)
     # remove any duplicates
     totalpids = list(set(totalpids))
     print("Found {1:d} keys to try after {0:.1f} seconds".format(time.time()-starttime, len(totalpids)))

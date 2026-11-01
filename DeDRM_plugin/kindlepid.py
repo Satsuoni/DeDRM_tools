@@ -18,8 +18,12 @@ import binascii
 
 #@@CALIBRE_COMPAT_CODE@@
 
-from .utilities import SafeUnbuffered
-from .argv_utils import unicode_argv
+try:
+    from .utilities import SafeUnbuffered
+    from .argv_utils import unicode_argv
+except ImportError:
+    from utilities import SafeUnbuffered
+    from argv_utils import unicode_argv
 
 letters = b'ABCDEFGHIJKLMNPQRSTUVWXYZ123456789'
 
@@ -69,18 +73,18 @@ def cli_main():
         print("Usage: kindlepid.py <Kindle Serial Number>/<iPhone/iPod Touch UDID>")
         return 1
     if len(serial)==16:
-        if serial.startswith("B") or serial.startswith("9"):
+        if serial.startswith(("B", "9", "G")):
             print("Kindle serial number detected")
         else:
             print("Warning: unrecognized serial number. Please recheck input.")
             return 1
-        pid = pidFromSerial(serial.encode("utf-8"),7)+'*'
-        print("Mobipocket PID for Kindle serial#{0} is {1}".format(serial,checksumPid(pid)))
+        pid = pidFromSerial(serial.encode("utf-8"),7)+b'*'
+        print("Mobipocket PID for Kindle serial#{0} is {1}".format(serial,checksumPid(pid).decode("utf-8")))
         return 0
     elif len(serial)==40:
         print("iPhone serial number (UDID) detected")
         pid = pidFromSerial(serial.encode("utf-8"),8)
-        print("Mobipocket PID for iPhone serial#{0} is {1}".format(serial,checksumPid(pid)))
+        print("Mobipocket PID for iPhone serial#{0} is {1}".format(serial,checksumPid(pid).decode("utf-8")))
         return 0
     print("Warning: unrecognized serial number. Please recheck input.")
     return 1

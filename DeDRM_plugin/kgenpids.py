@@ -185,10 +185,86 @@ def pidFromSerial(s, l):
     return pid
 
 
+_COMBINED_SPLIT_LENGTHS = (
+    (16, 40),
+    (32, 40),
+    (40, 40),
+    (16, 30),
+    (32, 30),
+    (40, 30),
+)
+
+
+def _to_bytes(val):
+    if isinstance(val, bytes):
+        return val
+    if isinstance(val, bytearray):
+        return bytes(val)
+    if isinstance(val, str):
+        return val.encode("utf-8")
+    return bytes(val)
+
+
+def _unhex_variants(raw_bytes):
+    raw = _to_bytes(raw_bytes).strip()
+    if not raw:
+        return []
+    out = [raw]
+    if len(raw) % 2 == 0:
+        try:
+            unhex = bytes.fromhex(raw.decode("ascii"))
+            if unhex and unhex not in out:
+                out.append(unhex)
+        except (UnicodeDecodeError, ValueError):
+            pass
+    return out
+
+
+def _serial_variants(raw_bytes):
+    raw = _to_bytes(raw_bytes).strip()
+    if not raw:
+        return []
+    out = [raw]
+    for v in (raw.upper(), raw.lower(), *_unhex_variants(raw)):
+        if v not in out:
+            out.append(v)
+    return out
+
+
+def _book_pid(material, rec209, token):
+    return checksumPid(encodePID(SHA1(material + rec209 + token)))
+
+
+def _emit_dsn_pids(_add, table, d, rec209, token, sec_vars=(), device_first=False):
+    if device_first and len(d) >= 4:
+        _add(checksumPid(generateDevicePID(table, d, 4)))
+    if device_first:
+        if len(d) == 16:
+            _add(checksumPid(pidFromSerial(d, 7) + b"*"))
+        _add(checksumPid(pidFromSerial(d, 8)))
+        for s in sec_vars:
+            _add(_book_pid(d + s, rec209, token))
+            _add(_book_pid(s, rec209, token))
+        _add(_book_pid(d, rec209, token))
+        return
+    for s in sec_vars:
+        _add(_book_pid(d + s, rec209, token))
+    for s in sec_vars:
+        _add(_book_pid(s, rec209, token))
+    _add(_book_pid(d, rec209, token))
+    if len(d) == 16:
+        _add(checksumPid(pidFromSerial(d, 7) + b"*"))
+    _add(checksumPid(pidFromSerial(d, 8)))
+    if len(d) >= 4:
+        _add(checksumPid(generateDevicePID(table, d, 4)))
+
+
 # Parse the EXTH header records and use the Kindle serial number to calculate the book pid.
 def getKindlePids(rec209, token, serialnum):
     if isinstance(serialnum,str):
         serialnum = serialnum.encode('utf-8')
+    elif isinstance(serialnum, bytearray):
+        serialnum = bytes(serialnum)
 
     if sys.version_info[0] == 2:
         if isinstance(serialnum,unicode):
@@ -198,17 +274,42 @@ def getKindlePids(rec209, token, serialnum):
         return [serialnum]
 
     pids=[]
+    seen=set()
+
+    def _add(pid10):
+        pid_bytes = bytes(pid10)
+        if pid_bytes not in seen:
+            seen.add(pid_bytes)
+            pids.append(pid_bytes)
+
+    if len(serialnum) in (8, 10):
+        _add(checksumPid(serialnum[:8]))
+        if len(serialnum) == 10:
+            _add(serialnum)
+        return pids
+
+    table = generatePidEncryptionTable()
+
+    for dsn_len, sec_len in _COMBINED_SPLIT_LENGTHS:
+        if len(serialnum) == dsn_len + sec_len:
+            dsn_vars = _serial_variants(serialnum[:dsn_len])
+            sec_vars = _unhex_variants(serialnum[dsn_len:])
+            for d in dsn_vars:
+                _emit_dsn_pids(_add, table, d, rec209, token, sec_vars)
+            return pids
 
     # Compute book PID
-    pidHash = SHA1(serialnum+rec209+token)
-    bookPID = encodePID(pidHash)
-    bookPID = checksumPid(bookPID)
-    pids.append(bookPID)
+    _add(_book_pid(serialnum, rec209, token))
 
     # compute fixed pid for old pre 2.5 firmware update pid as well
-    kindlePID = pidFromSerial(serialnum, 7) + b"*"
-    kindlePID = checksumPid(kindlePID)
-    pids.append(kindlePID)
+    _add(checksumPid(pidFromSerial(serialnum, 7) + b"*"))
+
+    if len(serialnum) in (30, 40):
+        for s in _unhex_variants(serialnum):
+            _add(_book_pid(s, rec209, token))
+
+    for v in _serial_variants(serialnum):
+        _emit_dsn_pids(_add, table, v, rec209, token)
 
     return pids
 
@@ -217,6 +318,11 @@ def getKindlePids(rec209, token, serialnum):
 
 keynames = ['kindle.account.tokens','kindle.cookie.item','eulaVersionAccepted','login_date','kindle.token.item','login','kindle.key.item','kindle.name.info','kindle.device.info', 'MazamaRandomNumber']
 def maybeUnhex(dat):
+  if isinstance(dat, (bytes, bytearray)):
+    try:
+      return bytearray.fromhex(dat.decode("ascii"))
+    except (UnicodeDecodeError, ValueError):
+      return bytearray(dat)
   try:
     return bytearray.fromhex(dat)
   except ValueError:
@@ -227,13 +333,13 @@ def getK4Pids(rec209, token, kindleDatabase):
     #print(f"Entering getK4Pids with token {token} and kindleDatabase {kindleDatabase}")
     try:
         # Get the kindle account token, if present
-        kindleAccountToken = bytearray.fromhex((kindleDatabase[1])['kindle.account.tokens'])
+        kindleAccountToken = maybeUnhex((kindleDatabase[1])['kindle.account.tokens'])
 
     except KeyError:
         kindleAccountToken = b''
         pass
     extraKindleTokens=kindleDatabase[1].get('kindle.account.secrets',[])
-    extraKindleTokens=[bytearray.fromhex(f) for f in extraKindleTokens]
+    extraKindleTokens=[maybeUnhex(f) for f in extraKindleTokens]
     extraKindleTokens.append(kindleAccountToken)
     #extraKindleTokens=list(set(extraKindleTokens))
     try:
@@ -244,24 +350,24 @@ def getK4Pids(rec209, token, kindleDatabase):
         # See if we have the info to generate the DSN
         try:
             # Get the Mazama Random number
-            MazamaRandomNumber = bytearray.fromhex((kindleDatabase[1])['MazamaRandomNumber'])
+            MazamaRandomNumber = maybeUnhex((kindleDatabase[1])['MazamaRandomNumber'])
             #print "Got MazamaRandomNumber from database {0}".format(kindleDatabase[0])
 
             try:
                 # Get the SerialNumber token, if present
-                IDString = bytearray.fromhex((kindleDatabase[1])['SerialNumber'])
+                IDString = maybeUnhex((kindleDatabase[1])['SerialNumber'])
                 print("Got SerialNumber from database {0}".format(kindleDatabase[0]))
             except KeyError:
                  # Get the IDString we added
-                IDString = bytearray.fromhex((kindleDatabase[1])['IDString'])
+                IDString = maybeUnhex((kindleDatabase[1])['IDString'])
 
             try:
                 # Get the UsernameHash token, if present
-                encodedUsername = bytearray.fromhex((kindleDatabase[1])['UsernameHash'])
+                encodedUsername = maybeUnhex((kindleDatabase[1])['UsernameHash'])
                 print("Got UsernameHash from database {0}".format(kindleDatabase[0]))
             except KeyError:
                 # Get the UserName we added
-                UserName = bytearray.fromhex((kindleDatabase[1])['UserName'])
+                UserName = maybeUnhex((kindleDatabase[1])['UserName'])
                 # encode it
                 encodedUsername = encodeHash(UserName,charMap1)
                 #print "encodedUsername",encodedUsername.encode('hex')
@@ -286,32 +392,41 @@ def getK4Pids(rec209, token, kindleDatabase):
             pids.append(DSN+accToken)
         return pids
 
+    seen = set()
+
+    def _add(pid10):
+        pid_bytes = bytes(pid10)
+        if pid_bytes not in seen:
+            seen.add(pid_bytes)
+            pids.append(pid_bytes)
+
+    def _collect_variants(initial, raw_items, expand_fn, allow_empty=False):
+        out = []
+        for item in initial:
+            b = bytes(item)
+            if (allow_empty or b) and b not in out:
+                out.append(b)
+        for item in raw_items:
+            if item:
+                for v in expand_fn(item):
+                    if v not in out:
+                        out.append(v)
+        return out
+
+    db_rec = kindleDatabase[1]
+    raw_tokens = [db_rec['kindle.account.tokens']] if db_rec.get('kindle.account.tokens') is not None else []
+    raw_tokens += db_rec.get('kindle.account.secrets', []) + db_rec.get('kindle.account.clear_old_secrets', [])
+    token_variants = _collect_variants(extraKindleTokens, raw_tokens, _unhex_variants, allow_empty=True)
+
+    raw_dsns = [db_rec[k] for k in ('DSN', 'DSN_clear') if db_rec.get(k) is not None]
+    raw_dsns += db_rec.get('extra.dsns', []) + db_rec.get('extra.dsns_clear', [])
+    dsn_variants = _collect_variants(extraDSNs, raw_dsns, _serial_variants)
+
     # Compute the device PID (for which I can tell, is used for nothing).
-    table =  generatePidEncryptionTable()
-    for DSN in extraDSNs:
-      devicePID = generateDevicePID(table,DSN,4)
-      devicePID = checksumPid(devicePID)
-      pids.append(devicePID)
-
-      # Compute book PIDs
-      for accToken in extraKindleTokens:
-        # book pid
-        pidHash = SHA1(DSN+accToken+rec209+token)
-        bookPID = encodePID(pidHash)
-        bookPID = checksumPid(bookPID)
-        pids.append(bookPID)
-
-        # variant 1
-        pidHash = SHA1(accToken+rec209+token)
-        bookPID = encodePID(pidHash)
-        bookPID = checksumPid(bookPID)
-        pids.append(bookPID)
-
-      # variant 2
-      pidHash = SHA1(DSN+rec209+token)
-      bookPID = encodePID(pidHash)
-      bookPID = checksumPid(bookPID)
-      pids.append(bookPID)
+    # Compute book PIDs
+    table = generatePidEncryptionTable()
+    for DSN in dsn_variants:
+        _emit_dsn_pids(_add, table, DSN, rec209, token, token_variants, device_first=True)
 
     return pids
 
