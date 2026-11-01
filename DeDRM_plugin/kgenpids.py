@@ -313,7 +313,7 @@ def getKindlePids(rec209, token, serialnum):
 
     return pids
 
-
+from ion import unwrap_account_secrets #ugh. one day, that should go to a separate file. 
 # parse the Kindleinfo file to calculate the book pid.
 
 keynames = ['kindle.account.tokens','kindle.cookie.item','eulaVersionAccepted','login_date','kindle.token.item','login','kindle.key.item','kindle.name.info','kindle.device.info', 'MazamaRandomNumber']
@@ -334,13 +334,20 @@ def getK4Pids(rec209, token, kindleDatabase):
     try:
         # Get the kindle account token, if present
         kindleAccountToken = maybeUnhex((kindleDatabase[1])['kindle.account.tokens'])
-
     except KeyError:
         kindleAccountToken = b''
         pass
+
     extraKindleTokens=kindleDatabase[1].get('kindle.account.secrets',[])
     extraKindleTokens=[maybeUnhex(f) for f in extraKindleTokens]
     extraKindleTokens.append(kindleAccountToken)
+    if "kindle.metrics.checksum" in kindleDatabase[1]:
+      try:
+        wrapped=maybeUnhex((kindleDatabase[1])['kindle.metrics.checksum'])
+        extraKindleTokens.extend(unwrap_account_secrets(wrapped))
+      except Exception as e:
+        print("Exception dealing with wrapped secrets:{}".format(e))
+        pass
     #extraKindleTokens=list(set(extraKindleTokens))
     try:
         # Get the DSN token, if present

@@ -5,7 +5,7 @@
 # Copyright © 2008-2022 Apprentice Harper et al.
 
 __license__ = 'GPL v3'
-__version__ = '3.1'
+__version__ = '4.0'
 
 # Revision history:
 #  1.0   - Kindle info file decryption, extracted from k4mobidedrm, etc.
@@ -31,6 +31,9 @@ __version__ = '3.1'
 #  2.8   - Fix for Mac OS X Big Sur
 #  3.0   - Python 3 for calibre 5.0
 #  3.1   - Only support PyCryptodome; clean up the code
+#  4.0   - Support Kindle for PC 1.36+ .kinf2024 (ObfuscatorV1 records + AES-256-GCM
+#          values, storage key unwrapped from the CNG key "KindleForPC_SS").
+#          New options: -m <hex32> -s <salt> -b <blob> --dump-master <file>
 
 
 """
@@ -39,6 +42,8 @@ Retrieve Kindle for PC/Mac user key.
 
 import sys, os, re
 import codecs
+import base64
+import hmac
 from struct import pack, unpack, unpack_from
 from string import ascii_uppercase
 import json
@@ -159,7 +164,311 @@ def UnprotectHeaderData(encryptedData):
     key_iv = PBKDF2(passwdData, salt, dkLen=256, count=128)
     return AES.new(key_iv[0:32], AES.MODE_CBC, key_iv[32:48]).decrypt(encryptedData)
 
+
+# ---------------------------------------------------------------------------
+# MSIX Kindle  1.36+ : the .kinf2024 container
+#
+#   file      = <header> '#' rec0 '}' rec1 '}' ...
+#   reci      = reverse(base64std(payload)) + '8'
+#   record    = F5 Caesar strip -> base64 -> F4 LZW -> F3 permutation (dwKey 467)
+#               -> B64Enc2 -> F2 rotate -> F1 transpose -> split on '*'
+#   KEY       = encodeHash(MD5(entry name), testMap8)   <- same scheme as .kinf2018
+#   VALUE     = A64( nonce(12) || ciphertext || tag(16) )          AES-256-GCM
+#   storageIKM= HKDF-SHA256(ikm=master32, salt=main_shared.salt, info='kindle_ss')
+#   entryKey  = HKDF-SHA256(ikm=storageIKM, salt=SHA1(KEY text), info='kindle_ss_token')
+#
+# The GCM tag makes the whole thing self-checking: a wrong master key, salt or
+# info string fails the tag, so a non-empty result is proof the key is right.
+# Courtesy of Qwen Flash Next Q3_S
+# ---------------------------------------------------------------------------
+
+# identical to the K4PC 1.9+ testMap8 already used above - the new format kept it
+KINF2024_MAP = b"YvaZ3FfUm9Nn_c1XuG4yCAzB0beVg-TtHh5SsIiR6rJjQdW2wEq7KkPpL8lOoMxD"
+KINF2024_DWKEY = 467          # ObfuscatorV1 F3 key
+KINF2024_F5_SHIFT = 1         # len(F5 key string) & 7
+KINF2024_F2_ROTATE = 2        # F2 key, from the decoder object at +0x0c
+KINF2024_INFO_STORAGE = b'kindle_ss'
+KINF2024_INFO_ENTRY = b'kindle_ss_token'
+
+# entry names seen in 1.36+ that the pre-2018 list does not carry
+KINF2024_EXTRA_NAMES = [
+    b'_KEY_DIRECTED_ID_',
+    b'_COLLECTION_ENTRIES_SYNC_COUNT_',
+    b'kindle.metrics.checksum',
+]
+
+# every name worth resolving in a 1.36+ container: the pre-2018 set plus the new ones
+KINF2024_NAMES = [
+    b'kindle.account.tokens', b'kindle.cookie.item', b'eulaVersionAccepted', b'login_date',
+    b'kindle.token.item', b'login', b'kindle.key.item', b'kindle.name.info',
+    b'kindle.device.info', b'MazamaRandomNumber', b'max_date', b'SIGVERIF',
+    b'build_version', b'SerialNumber', b'UsernameHash', b'kindle.directedid.info',
+    b'DSN', b'kindle.accounttype.info', b'krx.flashcardsplugin.data.encryption_key',
+    b'krx.notebookexportplugin.data.encryption_key', b'proxy.http.password',
+    b'proxy.http.username', b'kindle.note', b'kindle.highlight', b'kindle.bookmark',
+    b'kindle.graphical_highlight', b'kindle.most_recent_read',
+] + KINF2024_EXTRA_NAMES
+
+
+def kinf2024Records(data):
+    """container bytes -> list of record byte strings"""
+    h = data.find(b'#')
+    if h < 0:
+        raise DrmException('.kinf2024: no header terminator')
+    return [r for r in data[h + 1:].split(b'}') if r]
+
+
+def isKinf2024(path, data=None):
+    """True if this looks like the 1.36+ container rather than a .kinf2011/2018 file.
+    The old formats are '/'-separated and have no '#' or '}'."""
+    if path.endswith('2024'):
+        return True
+    if data is None:
+        try:
+            with open(path, 'rb') as fh:
+                data = fh.read(4096)
+        except OSError:
+            return False
+    return data.find(b'}') >= 0 and 0 <= data.find(b'#') < data.find(b'}')
+
+
+def obfF5Strip(rec, k=KINF2024_F5_SHIFT):
+    """ObfV1_F5_CaesarStrip: reverse the record, drop the one marker char the encoder
+    prepended, then apply +k to even indices and -k to odd ones.  Each character class
+    wraps in its own range; '+' '/' '=' and everything else pass through."""
+    body = rec[::-1][1:]
+    out = []
+    for i, c in enumerate(body):
+        o = ord(c)
+        s = k if i % 2 == 0 else -k
+        if 65 <= o <= 90:
+            out.append(chr((o - 65 + s) % 26 + 65))
+        elif 97 <= o <= 122:
+            out.append(chr((o - 97 + s) % 26 + 97))
+        elif 48 <= o <= 57:
+            out.append(chr((o - 48 + s) % 10 + 48))
+        else:
+            out.append(c)
+    return ''.join(out)
+
+
+def obfF4Decode(codes):
+    """ObfV1_F4_Dec: LZW whose dictionary starts as the identity over 0..255."""
+    d = {k: bytes(bytearray([k])) for k in range(256)}
+    res = bytearray()
+    prev = None
+    for c in codes:
+        if c in d:
+            e = d[c]
+        elif prev is not None:
+            e = prev + prev[:1]              # the LZW corner case
+        else:
+            raise DrmException('F4: unknown code with no history')
+        res += e
+        if prev is not None:
+            d[len(d)] = prev + e[:1]
+        prev = e
+    return res.decode('latin1')
+
+
+def obfF3Perm(L, dwKey=KINF2024_DWKEY):
+    """ObfV1_F3_Dec in closed form: out[j] = in[perm[j]].
+    The permutation is the reading order of a triangular bounce, so cell i maps to
+    bounce(i, dwKey-1); sorting the (bounce, index) pairs gives the write order."""
+    p = dwKey - 1
+    if p <= 0:
+        return list(range(L))
+
+    def bounce(i):
+        m = 2 * p
+        r = i % m
+        return r if r <= p else m - r
+
+    mark = [(bounce(i), i) for i in range(L)]
+    wr = sorted(mark)
+    pos = {}
+    for idx, cell in enumerate(wr):
+        pos[cell[1]] = idx
+    return [pos[cell[1]] for cell in mark]
+
+
+def obfB64Enc2(s):
+    """ObfV1_B64Enc2: the 7-symbol alphabet {a..f, A, Z} back to a bit string.
+    'Z' separates runs, a run of length rank(c)+1; 'xAy' emits (rank(x)+1) zeros
+    followed by (rank(y)+1) ones."""
+    rank = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5}
+    bits = []
+    for tok in s.split('Z'):
+        if not tok:
+            continue
+        if len(tok) == 3 and tok[1] == 'A':
+            if tok[0] not in rank or tok[2] not in rank:
+                raise DrmException('B64Enc2: bad symbol in %r' % tok)
+            bits.append('0' * (rank[tok[0]] + 1))
+            bits.append('1' * (rank[tok[2]] + 1))
+        else:
+            if tok[-1] not in rank:
+                raise DrmException('B64Enc2: bad symbol in %r' % tok)
+            bits.append('1' * (rank[tok[-1]] + 1))
+    return ''.join(bits)
+
+
+def obfF2Decode(bits, n=KINF2024_F2_ROTATE):
+    """ObfV1_F2_Dec: rotate the bit string right by n, then pack 8 bits per char."""
+    if len(bits) % 8 != 0:
+        raise DrmException('F2: bit count %d is not a multiple of 8' % len(bits))
+    rot = bits[-n:] + bits[:-n]
+    return ''.join(chr(int(rot[i:i + 8], 2)) for i in range(0, len(rot), 8))
+
+
+def obfF1Decode(s):
+    """ObfV1_F1_Dec: 5-row column-major transpose, '^' standing for ' '."""
+    nc = s.count('^')
+    ncols = (len(s) - nc) // 5 + 1
+    rows = [s[i * ncols:(i + 1) * ncols] for i in range(5)]
+    out = []
+    for c in range(ncols):
+        for r in range(5):
+            ch = rows[r][c]
+            out.append(' ' if ch == '^' else ch)
+    return ''.join(out)
+
+
+def kinf2024DecodeRecord(rec):
+    """record bytes -> (KEY text, VALUE text) as latin1 strings.
+    The KEY text is exactly what encodeHash(name, KINF2024_MAP) produces."""
+    x = obfF5Strip(rec.decode('latin1'))
+    codes = [int(t) for t in base64.b64decode(x + '=' * (-len(x) % 4)).decode('latin1')
+             .rstrip(',').split(',') if t != '']
+    f4 = obfF4Decode(codes)
+    perm = obfF3Perm(len(f4))
+    f3 = ''.join(f4[j] for j in perm)
+    flat = obfF1Decode(obfF2Decode(obfB64Enc2(f3)))
+    keytext, _, valtext = flat.rstrip(' ').partition('*')
+    if not valtext:
+        raise DrmException('record has no KEY/VALUE separator')
+    return keytext, valtext
+
+
+def hkdfSha256(ikm, salt, info, dkLen):
+    """RFC 5869 HKDF-SHA256 (the binary reaches it through OpenSSL's EVP_PKEY HKDF)."""
+    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
+    okm = b''
+    t = b''
+    i = 1
+    while len(okm) < dkLen:
+        t = hmac.new(prk, t + info + bytes(bytearray([i])), hashlib.sha256).digest()
+        okm += t
+        i += 1
+    return okm[:dkLen]
+
+
+def kinf2024StorageIkm(master32, salt):
+    """The 32 bytes the binary hands to HKDF_KEY after CryptUnprotectMemory."""
+    return hkdfSha256(master32, salt, KINF2024_INFO_STORAGE, 32)
+
+
+def kinf2024EntryKey(storageIkm, keytext):
+    return hkdfSha256(storageIkm, SHA1(keytext.encode('latin1')), KINF2024_INFO_ENTRY, 32)
+
+
+def aesGcmDecrypt(key, blob):
+    """nonce(12) || ciphertext || tag(16) -> plaintext, or b'' if the tag fails."""
+    if len(blob) < 28:
+        return b''
+    try:
+        cipher = AES.new(key, AES.MODE_GCM, nonce=blob[:12])
+        return cipher.decrypt_and_verify(blob[12:-16], blob[-16:])
+    except (ValueError, KeyError, IndexError):
+        return b''
+
+
+# the master key last recovered from main_shared.blob, so --dump-master can save it
+_kinf2024MasterKey = None
+
+
+def kinf2024MasterKey():
+    return _kinf2024MasterKey
+
 # Routines unique to Mac and PC
+def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None):
+    """Kindle for PC 1.36+ .kinf2024 -> {name: plaintext}.
+
+    Everything here except the NCrypt unwrap is pure computation, so master32 (the
+    32-byte storage master key, as hex) can be supplied with -m and the .kinf2024 file
+    can then be decrypted on any machine that has the key.  Without -m it needs Windows
+    plus main_shared.blob next to the .kinf2024 file (or given with -b).
+    """
+    with open(kInfoFile, 'rb') as fh:
+        data = fh.read()
+    recs = kinf2024Records(data)
+
+    storagedir = os.path.dirname(kInfoFile) or '.'
+    if saltFile is None:
+        saltFile = os.path.join(storagedir, 'main_shared.salt')
+    if blobFile is None:
+        blobFile = os.path.join(storagedir, 'main_shared.blob')
+
+    if not os.path.isfile(saltFile):
+        print('Cannot find main_shared.salt (looked in ' + storagedir + ', or pass -s)')
+        return {}
+    with open(saltFile, 'rb') as fh:
+        salt = fh.read()
+
+    key = None
+    how = None
+    if master32:
+        try:
+            key = bytes.fromhex(str(master32).replace('0x', '').replace(':', '').replace(' ', ''))
+        except ValueError:
+            print('-m expects the master key as hex, got %r' % (master32,))
+            return {}
+        if len(key) != 32:
+            print('-m expects 32 bytes (64 hex digits), got %d bytes' % len(key))
+            return {}
+        how = 'supplied with -m'
+    else:
+        if not iswindows:
+            print('Unwrapping main_shared.blob needs Windows; pass the master key with -m.')
+            return {}
+        if not os.path.isfile(blobFile):
+            print('Cannot find main_shared.blob (looked in ' + storagedir + ', or pass -b)')
+            return {}
+        with open(blobFile, 'rb') as fh:
+            blob = fh.read()
+        key = NCryptUnwrapMasterKey(blob)
+        if key is None:
+            print('Could not unwrap main_shared.blob with the CNG key %r.' % KINDLE_CNG_KEY_NAME)
+            print('If Kindle is not installed for this user, pass the master key with -m.')
+            return {}
+        how = 'unwrapped from ' + os.path.basename(blobFile)
+
+    ikm = kinf2024StorageIkm(key, salt)
+    namehashmap = {encodeHash(n, KINF2024_MAP): n for n in KINF2024_NAMES}
+    DB = {}
+    for rec in recs:
+        try:
+            keytext, valtext = kinf2024DecodeRecord(rec)
+        except (DrmException, ValueError, IndexError):
+            continue
+        vb = decode(valtext.encode('latin1'), KINF2024_MAP)
+        # the GCM tag is the test: only the right master key yields any plaintext
+        pt = aesGcmDecrypt(kinf2024EntryKey(ikm, keytext), vb)
+        if not pt:
+            continue
+        DB[namehashmap.get(keytext.encode('latin1'), keytext.encode('latin1'))] = pt
+
+    if not DB:
+        print('No .kinf2024 entry passed its GCM tag - wrong master key or salt.')
+        return {}
+    global _kinf2024MasterKey
+    _kinf2024MasterKey = key
+    print('Decrypted .kinf2024: %d of %d entries, master key %s' % (len(DB), len(recs), how))
+    if iswindows:
+        DB[b'IDString'] = GetIDString().encode('utf-8')
+        DB[b'UserName'] = GetUserName()
+    return DB
+
 if iswindows:
     from ctypes import windll, c_char_p, c_wchar_p, c_uint, POINTER, byref, \
         create_unicode_buffer, create_string_buffer, CFUNCTYPE, addressof, \
@@ -280,6 +589,86 @@ if iswindows:
         return CryptUnprotectData
     CryptUnprotectData = CryptUnprotectData()
 
+    # ------------------------------------------------------------------ NCrypt
+    # In MSIX 1.36+ the storage master key is not DPAPI-protected.  <storage>\main_shared.blob
+    # is a 256-byte RSA-2048 ciphertext, unwrapped by the persisted CNG key
+    # "KindleForPC_SS" This is a direct port of the decrypt_blob() reference
+    # implementation that unwraps the real key.
+    #
+    # Two things there are easy to get "right" and still be wrong, so they are copied
+    # exactly: the padding info is the BCRYPT_ struct handed straight to pPaddingInfo
+    # rather than wrapped in an NCRYPT_OAEP_PADDING_INFO, and dwFlags is 4 rather than
+    # NCRYPT_PAD_OAEP_FLAG.  That is what the binary passes and what the provider accepts.
+    # The provider name the binary uses is decrypted at runtime and so cannot be read out
+    # of the image; MS_PLATFORM_CRYPTO_PROVIDER is the one that holds the key (it is a TPM
+    # key), with the software provider tried as a fallback for a non-TPM copy.
+    ncrypt = windll.ncrypt
+
+    NCRYPT_DECRYPT_FLAGS = 4
+    BCRYPT_SHA256_ALGORITHM = u'SHA256'
+    MS_PLATFORM_CRYPTO_PROVIDER = u'Microsoft Platform Crypto Provider'
+    MS_SOFTWARE_KEY_STORAGE_PROVIDER = u'Microsoft Software Key Storage Provider'
+    KINDLE_CNG_KEY_NAME = u'KindleForPC_SS'
+    NTE_BAD_KEYSET = 0x80090016
+
+    class BCRYPT_OAEP_PADDING_INFO(Structure):
+        _fields_ = [('pszAlgId', c_wchar_p),
+                    ('pbLabel', c_void_p),
+                    ('cbLabel', c_uint)]
+
+    def NCryptUnwrapMasterKey(blob, keyname=KINDLE_CNG_KEY_NAME):
+        """Unwrap main_shared.blob into the 32-byte storage master key, or None."""
+        _open_provider = ncrypt.NCryptOpenStorageProvider
+        _open_provider.argtypes = [POINTER(c_void_p), c_wchar_p, c_uint]
+        _open_provider.restype = c_uint
+        _open_key = ncrypt.NCryptOpenKey
+        _open_key.argtypes = [c_void_p, POINTER(c_void_p), c_wchar_p, c_uint, c_uint]
+        _open_key.restype = c_uint
+        _decrypt = ncrypt.NCryptDecrypt
+        _decrypt.argtypes = [c_void_p, c_char_p, c_uint, c_void_p, c_void_p, c_uint,
+                             POINTER(c_uint), c_uint]
+        _decrypt.restype = c_uint
+        _free = ncrypt.NCryptFreeObject
+        _free.argtypes = [c_void_p]
+        _free.restype = c_uint
+
+        for provider in (MS_PLATFORM_CRYPTO_PROVIDER, MS_SOFTWARE_KEY_STORAGE_PROVIDER):
+            hProvider = c_void_p(0)
+            status = _open_provider(byref(hProvider), provider, 0)
+            if status != 0:
+                print('NCryptOpenStorageProvider(%s) failed: 0x%08x' % (provider, status))
+                continue
+            try:
+                hKey = c_void_p(0)
+                status = _open_key(hProvider, byref(hKey), keyname, 0, 0)
+                if status != 0:
+                    if status == NTE_BAD_KEYSET:
+                        print('The CNG key %r does not exist for this user' % keyname)
+                    else:
+                        print('NCryptOpenKey(%s) failed: 0x%08x' % (keyname, status))
+                    continue
+                try:
+                    oaep = BCRYPT_OAEP_PADDING_INFO(BCRYPT_SHA256_ALGORITHM, None, 0)
+                    out = create_string_buffer(len(blob))
+                    cbres = c_uint(0)
+                    status = _decrypt(hKey, blob, len(blob), byref(oaep),
+                                      cast(out, c_void_p), len(out), byref(cbres),
+                                      NCRYPT_DECRYPT_FLAGS)
+                    if status != 0:
+                        print('NCryptDecrypt via %s failed: 0x%08x' % (provider, status))
+                        continue
+                    raw = string_at(out, cbres.value)
+                    # the unwrap leaves the 32-byte key followed by zero padding
+                    if len(raw) >= 32:
+                        print("Got blob: {}".format(raw[:32].hex()))
+                        return raw[:32]
+                    print('NCryptDecrypt returned only %d bytes' % len(raw))
+                finally:
+                    _free(hKey)
+            finally:
+                _free(hProvider)
+        return None
+
     # Returns Environmental Variables that contain unicode
     # name must be unicode string, not byte string.
     def getEnvironmentVariable(name):
@@ -338,7 +727,14 @@ if iswindows:
                 found = True
                 print('Found K4PC 1.25+ kinf2018 file: ' + kinfopath)
                 kInfoFiles.append(kinfopath)
-
+            kinfodir = path +'\\Packages\\AMZNKindle.AmazonKindleReadingApp_m1sc522ngdk36\\LocalState\\Classic\\Data\\storage\\'
+            if os.path.isdir(kinfodir):
+              kinfopath =kinfodir+".kinf2024"
+              if os.path.isfile(kinfopath):
+                  found = True
+                  print('Found MSIX K4PC kinf2024 file: ' + kinfopath)
+                  kInfoFiles.append(kinfopath)
+            
             # look for (K4PC 1.9.0 and later) .kinf2011 file
             kinfopath = path +'\\Amazon\\Kindle\\storage\\.kinf2011'
             if os.path.isfile(kinfopath):
@@ -374,7 +770,9 @@ if iswindows:
 
     # determine type of kindle info provided and return a
     # database of keynames and values
-    def getDBfromFile(kInfoFile):
+    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None):
+        if isKinf2024(kInfoFile):
+            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile)
         names = [\
             b'kindle.account.tokens',\
             b'kindle.cookie.item',\
@@ -728,7 +1126,9 @@ elif isosx:
 
     # determine type of kindle info provided and return a
     # database of keynames and values
-    def getDBfromFile(kInfoFile):
+    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None):
+        if isKinf2024(kInfoFile):
+            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile)
         names = [\
             b'kindle.account.tokens',\
             b'kindle.cookie.item',\
@@ -902,16 +1302,18 @@ elif isosx:
             DB = {}
         return DB
 else:
-    def getDBfromFile(kInfoFile):
+    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None):
+        if isKinf2024(kInfoFile):
+            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile)
         raise DrmException("This script only runs under Windows or Mac OS X.")
         return {}
 
-def kindlekeys(files = []):
+def kindlekeys(files = [], master32=None, saltFile=None, blobFile=None):
     keys = []
     if files == []:
         files = getKindleInfoFiles()
     for file in files:
-        key = getDBfromFile(file)
+        key = getDBfromFile(file, master32, saltFile, blobFile)
         if key:
             # convert all values to hex, just in case.
             n_key = {}
@@ -1004,8 +1406,16 @@ def get_device_setting(name,book_root):
 
 # interface for Python DeDRM
 # returns single key or multiple keys, depending on path or file passed in
-def getkey(outpath, files=[]):
-    keys = kindlekeys(files)
+def getkey(outpath, files=[], master32=None, saltFile=None, blobFile=None, dumpMaster=None):
+    keys = kindlekeys(files, master32, saltFile, blobFile)
+    if dumpMaster and kinf2024MasterKey():
+        try:
+            with open(dumpMaster, 'wb') as f:
+                f.write(kinf2024MasterKey().hex().encode('ascii') + b'\n')
+            print('Saved the .kinf2024 storage master key to ' + dumpMaster)
+            print('Recover it later with:  kindlekey.py -m "$(cat ' + dumpMaster + ')" ...')
+        except (IOError, OSError) as e:
+            print('Could not write ' + dumpMaster + ': ' + str(e))
     if len(keys) > 0:
         if not os.path.isdir(outpath):
             outfile = outpath
@@ -1031,7 +1441,15 @@ def usage(progname):
     print("Keys are saved to the current directory, or a specified output directory.")
     print("If a file name is passed instead of a directory, only the first key is saved, in that file.")
     print("Usage:")
-    print("    {0:s} [-h] [-k <kindle.info>] [<outpath>]".format(progname))
+    print("    {0:s} [-h] [-k <kindle.info>] [-m hex] [-s salt] [-b blob] [--dump-master f] [<outpath>]".format(progname))
+    print("Options for Kindle for PC 1.36+ (.kinf2024):")
+    print("  -m HEX | --master-key HEX   32-byte storage master key as 64 hex digits. Skips the")
+    print("                              NCrypt unwrap of main_shared.blob, so the .kinf2024 file")
+    print("                              can be decrypted on any machine that has the key.")
+    print("  -s FILE | --salt-file FILE  main_shared.salt (default: alongside the .kinf2024 file).")
+    print("  -b FILE | --blob-file FILE  main_shared.blob (default: alongside the .kinf2024 file).")
+    print("  --dump-master FILE          Write the master key recovered from main_shared.blob to")
+    print("                              FILE so later runs can use -m without the CNG key.")
 
 
 def cli_main():
@@ -1042,19 +1460,29 @@ def cli_main():
     print("{0} v{1}\nCopyright © 2010-2020 by some_updates, Apprentice Harper et al.".format(progname,__version__))
 
     try:
-        opts, args = getopt.getopt(argv[1:], "hk:")
+        opts, args = getopt.getopt(argv[1:], "hk:m:s:b:",
+                                   ["master-key=", "salt-file=", "blob-file=", "dump-master="])
     except getopt.GetoptError as err:
         print("Error in options or arguments: {0}".format(err.args[0]))
         usage(progname)
         sys.exit(2)
 
     files = []
+    master32 = saltFile = blobFile = dumpMaster = None
     for o, a in opts:
         if o == "-h":
             usage(progname)
             sys.exit(0)
         if o == "-k":
             files = [a]
+        if o in ("-m", "--master-key"):
+            master32 = a
+        if o in ("-s", "--salt-file"):
+            saltFile = a
+        if o in ("-b", "--blob-file"):
+            blobFile = a
+        if o == "--dump-master":
+            dumpMaster = a
 
     if len(args) > 1:
         usage(progname)
@@ -1072,7 +1500,7 @@ def cli_main():
     # make sure the outpath is canonical
     outpath = os.path.realpath(os.path.normpath(outpath))
 
-    if not getkey(outpath, files):
+    if not getkey(outpath, files, master32, saltFile, blobFile, dumpMaster):
         print("Could not retrieve Kindle for Mac/PC key.")
     return 0
 

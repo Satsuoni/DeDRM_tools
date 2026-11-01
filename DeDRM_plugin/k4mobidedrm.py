@@ -256,7 +256,7 @@ def GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime 
         uhx=try_dehex(dsn)
         if uhx is not None and len(uhx) in accepted_dsn_lengths:
           k4i_serials.add(uhx)
-      secrets=[db.get("kindle.account.tokens",None)]
+      secrets=[db.get("kindle.account.tokens",None),db.get("kindle.metrics.checksum",None)] #no idea why new files call it that.
       secrets.extend(db.get("kindle.account.secrets",[]))
       secrets.extend(db.get("kindle.account.new_secrets",[])) #not working for now until key is found
       secrets.extend(db.get("kindle.account.clear_old_secrets",[]))
