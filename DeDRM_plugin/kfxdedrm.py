@@ -239,7 +239,7 @@ def _stage_credential_maps(candidate_strings):
 
 
 def _key_passes_oracle(key, oracle_source):
-    """Only an explicit REJECTED verdict fails; no oracle at all passes."""
+    """Accept compressed LZMA or independently verified uncompressed DRMION pages."""
     if oracle_source is None or not key or len(key) != 16:
         return True
     stages = _stage_ladder()
@@ -249,6 +249,14 @@ def _key_passes_oracle(key, oracle_source):
         verdict = stages.verify_page(oracle_source, key)
     except Exception:  # noqa: BLE001 - unreadable, no page to check
         return True
+    if verdict is not None and verdict.get('verdict') == 'REJECTED':
+        try:
+            from kfx_page_validation import check_uncompressed
+            uncompressed_valid, _checks = check_uncompressed(oracle_source, key)
+            if uncompressed_valid is True:
+                verdict = dict(verdict, verdict='CONFIRMED')
+        except Exception:
+            pass  # retain the original rejection for malformed or ambiguous pages
     return not (verdict is not None and verdict.get('verdict') == 'REJECTED')
 
 

@@ -170,8 +170,8 @@ def UnprotectHeaderData(encryptedData):
 #
 #   file      = <header> '#' rec0 '}' rec1 '}' ...
 #   reci      = reverse(base64std(payload)) + '8'
-#   record    = F5 Caesar strip -> base64 -> F4 LZW -> F3 permutation (dwKey 467)
-#               -> B64Enc2 -> F2 rotate -> F1 transpose -> split on '*'
+#   record    = F5 Caesar strip -> base64 -> F4 LZW -> F3 permutation (dwF3Key)
+#               -> B64Enc2 -> F2 rotate (dwF2Key = dwF3Key % 5) -> F1 transpose -> split on '*'
 #   KEY       = encodeHash(MD5(entry name), testMap8)   <- same scheme as .kinf2018
 #   VALUE     = A64( nonce(12) || ciphertext || tag(16) )          AES-256-GCM
 #   storageIKM= HKDF-SHA256(ikm=master32, salt=main_shared.salt, info='kindle_ss')
@@ -184,9 +184,26 @@ def UnprotectHeaderData(encryptedData):
 
 # identical to the K4PC 1.9+ testMap8 already used above - the new format kept it
 KINF2024_MAP = b"YvaZ3FfUm9Nn_c1XuG4yCAzB0beVg-TtHh5SsIiR6rJjQdW2wEq7KkPpL8lOoMxD"
-KINF2024_DWKEY = 467          # ObfuscatorV1 F3 key
-KINF2024_F5_SHIFT = 1         # len(F5 key string) & 7
-KINF2024_F2_ROTATE = 2        # F2 key, from the decoder object at +0x0c
+# The ObfuscatorV1 keys are NOT constants.  SecureStorageFileObfuscatorV1Ctor_18011c5b0
+# derives all four from one string `s` (dsx_storage.md 24 and 25):
+#
+#   s        = sprintf("%u", GetVolumeInformationW(QDir::rootPath()).VolumeSerialNumber),
+#              or "9999999999" when that call fails   <- GetVolumeSerialDecimalString_1810059e0
+#   f1_key   = last 5 chars of s                -> F1_Dec uses only its length: 5 rows, always
+#   dwF3_key = sum of the bytes of s            -> F3 permutation parameter p = dwF3_key - 1
+#   dwF2_key = dwF3_key % 5                     -> F2 bit-string rotate amount
+#   f5_key   = str(sum(byte[i] * (i+1)) % 8)    -> always 1 char, so the F5 shift is always 1
+#
+# Reference device: volume serial 236943134 -> s = "236943134", which reproduces every live
+# value ever captured for this build: f1_key "43134", dwF3_key 467, dwF2_key 2, f5_key "7".
+# Only dwF3_key / dwF2_key move between machines, so 467 / 2 are a fallback, not a constant.
+
+KINF2024_DWKEY = 467          # reference-device dwF3_key; prefer obfDeriveKeys()/kinf2024RecoverKeys()
+KINF2024_F5_SHIFT = 1         # len(f5_key) & 7 -- f5_key is always one char, so this one IS universal
+KINF2024_F2_ROTATE = 2        # reference-device dwF2_key, i.e. 467 % 5
+KINF2024_VOLSERIAL_FALLBACK = '9999999999'      # `s` when GetVolumeInformationW fails
+KINF2024_DWKEY_MIN = 48       # s is 1..10 decimal digits -> sum(bytes) in 1*'0' .. 10*'9'
+KINF2024_DWKEY_MAX = 570
 KINF2024_INFO_STORAGE = b'kindle_ss'
 KINF2024_INFO_ENTRY = b'kindle_ss_token'
 
@@ -232,6 +249,62 @@ def isKinf2024(path, data=None):
     return data.find(b'}') >= 0 and 0 <= data.find(b'#') < data.find(b'}')
 
 
+# ---------------------------------------------------------------------------
+# ObfuscatorV1 key derivation -- SecureStorageFileObfuscatorV1Ctor_18011c5b0
+# ---------------------------------------------------------------------------
+
+def obfDeriveF3Key(src):
+    """ObfV1_DeriveF3Key_18011d230.  The CFF state machine reduces to: while the string is
+    longer than 5 characters, replace it by the decimal form of its byte sum, then parse it.
+    For any realistic key source that single pass is the whole computation, i.e. dwF3_key is
+    just the sum of the bytes of `s`."""
+    t = src
+    while len(t) > 5:
+        t = str(sum(bytearray(t.encode('latin1'))) & 0xffffffff)
+    try:
+        return int(t)
+    except ValueError:
+        raise DrmException('ObfuscatorV1: key source %r does not reduce to a number' % (src,))
+
+
+def obfDeriveF1KeyTail5(src):
+    """ObfV1_DeriveF1KeyTail5_18011d8a0 -- the last 5 characters of the key source.
+    ObfV1_F1_Dec only reads its length, so the digits themselves never matter."""
+    if len(src) < 5:
+        raise DrmException('ObfuscatorV1: key source shorter than 5 characters')
+    return src[-5:]
+
+
+def obfDeriveF5Key(src):
+    """ObfV1_DeriveF5Key_18011cfa0 -- position-weighted byte sum, mod 8, as a decimal string.
+    ObfV1_F5_CaesarStrip uses len(f5_key) & 7 and this is always a single char, which is why
+    the Caesar shift is 1 on every device.  s = "236943134" gives w = 2327 -> "7"."""
+    w = sum(b * (i + 1) for i, b in enumerate(bytearray(src.encode('latin1')))) & 0xffffffff
+    return str(w % 8)
+
+
+def obfDeriveKeys(src):
+    """key-source string -> dict of the four ObfuscatorV1 keys."""
+    k3 = obfDeriveF3Key(src)
+    return {'src': src, 'f1Key': obfDeriveF1KeyTail5(src), 'dwF3Key': k3,
+            'dwF2Key': k3 % 5, 'f5Key': obfDeriveF5Key(src)}
+
+
+def obfKeysFromVolumeSerial(serial):
+    """DWORD volume serial number -> keys.  This is all you need off the target machine:
+    PowerShell (Get-Volume -DriveLetter C).SerialNumber, or cmd `vol`.  `s` is that number
+    in DECIMAL, not hex -- 236943134, not 0x0e2244de."""
+    return obfDeriveKeys('%u' % (int(serial) & 0xffffffff))
+
+
+def obfKeysFromDwKey(dwF3Key):
+    """Keys when only dwF3_key is known.  f1_key and f5_key cannot be recovered from it, but
+    F1_Dec and F5_CaesarStrip consume only their lengths (5 and 1), which these placeholders
+    reproduce exactly."""
+    return {'src': None, 'f1Key': '0' * 5, 'dwF3Key': int(dwF3Key),
+            'dwF2Key': int(dwF3Key) % 5, 'f5Key': '0'}
+
+
 def obfF5Strip(rec, k=KINF2024_F5_SHIFT):
     """ObfV1_F5_CaesarStrip: reverse the record, drop the one marker char the encoder
     prepended, then apply +k to even indices and -k to odd ones.  Each character class
@@ -274,7 +347,10 @@ def obfF4Decode(codes):
 def obfF3Perm(L, dwKey=KINF2024_DWKEY):
     """ObfV1_F3_Dec in closed form: out[j] = in[perm[j]].
     The permutation is the reading order of a triangular bounce, so cell i maps to
-    bounce(i, dwKey-1); sorting the (bounce, index) pairs gives the write order."""
+    bounce(i, dwKey-1); sorting the (bounce, index) pairs gives the write order.
+    dwKey is dwF3_key from obfDeriveKeys() -- device-specific.  Note that for dwKey-1 >= L
+    the permutation degenerates to the identity, so a record shorter than the key carries no
+    information about it."""
     p = dwKey - 1
     if p <= 0:
         return list(range(L))
@@ -298,8 +374,13 @@ def obfB64Enc2(s):
     followed by (rank(y)+1) ones."""
     rank = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5}
     bits = []
-    for tok in s.split('Z'):
+    tokens = s.split('Z')
+    for index, tok in enumerate(tokens):
         if not tok:
+            continue
+        if index == len(tokens) - 1 and len(tok) == 2 and tok[0] in rank and tok[1] == 'A':
+            # An xA suffix encodes a final zero run without a following one run.
+            bits.append('0' * (rank[tok[0]] + 1))
             continue
         if len(tok) == 3 and tok[1] == 'A':
             if tok[0] not in rank or tok[2] not in rank:
@@ -314,7 +395,8 @@ def obfB64Enc2(s):
 
 
 def obfF2Decode(bits, n=KINF2024_F2_ROTATE):
-    """ObfV1_F2_Dec: rotate the bit string right by n, then pack 8 bits per char."""
+    """ObfV1_F2_Dec: rotate the bit string right by n, then pack 8 bits per char.
+    n is dwF2_key, which the constructor sets to dwF3_key % 5 -- it is not independent."""
     if len(bits) % 8 != 0:
         raise DrmException('F2: bit count %d is not a multiple of 8' % len(bits))
     rot = bits[-n:] + bits[:-n]
@@ -334,16 +416,52 @@ def obfF1Decode(s):
     return ''.join(out)
 
 
-def kinf2024DecodeRecord(rec):
+def kinf2024RecordLooksValid(rec, keys):
+    """Cheap structural oracle for key recovery: the KEY field is always 32 characters of the
+    A64 alphabet and the VALUE only ever holds A64 characters, so a wrong dwF3_key (and with
+    it a wrong dwF2_key = dwF3_key % 5) essentially never survives."""
+    try:
+        keytext, valtext = kinf2024DecodeRecord(rec, keys)
+    except Exception:
+        return False
+    alpha = set(KINF2024_MAP.decode('latin1'))
+    if len(keytext) != 32:
+        return False
+    return all(c in alpha for c in keytext) and all(c in alpha for c in valtext)
+
+
+def kinf2024RecoverKeys(recs, lo=KINF2024_DWKEY_MIN, hi=KINF2024_DWKEY_MAX):
+    """Recover the ObfuscatorV1 keys from the container alone, with no device access.
+    `s` is a decimal digit string of 1..10 characters, so dwF3_key = sum(bytes) is confined
+    to 48..570 and dwF2_key is then fixed at dwF3_key % 5 -- 523 candidates, and the record
+    structure picks out the one that works.  Returns None if none does."""
+    probe = recs[:4]
+    if not probe:
+        return None
+    for k in range(lo, hi + 1):
+        keys = obfKeysFromDwKey(k)
+        if all(kinf2024RecordLooksValid(r, keys) for r in probe):
+            return keys
+    return None
+
+
+def kinf2024DecodeRecord(rec, keys=None):
     """record bytes -> (KEY text, VALUE text) as latin1 strings.
-    The KEY text is exactly what encodeHash(name, KINF2024_MAP) produces."""
+    The KEY text is exactly what encodeHash(name, KINF2024_MAP) produces.
+    `keys` is a dict from obfDeriveKeys() / obfKeysFromVolumeSerial() /
+    kinf2024RecoverKeys(), or a bare dwF3_key integer.  Omit it only to get the
+    reference-device keys."""
+    if keys is None:
+        keys = obfKeysFromDwKey(KINF2024_DWKEY)
+    elif not isinstance(keys, dict):
+        keys = obfKeysFromDwKey(keys)
     x = obfF5Strip(rec.decode('latin1'))
     codes = [int(t) for t in base64.b64decode(x + '=' * (-len(x) % 4)).decode('latin1')
              .rstrip(',').split(',') if t != '']
     f4 = obfF4Decode(codes)
-    perm = obfF3Perm(len(f4))
+    perm = obfF3Perm(len(f4), keys['dwF3Key'])
     f3 = ''.join(f4[j] for j in perm)
-    flat = obfF1Decode(obfF2Decode(obfB64Enc2(f3)))
+    flat = obfF1Decode(obfF2Decode(obfB64Enc2(f3), keys['dwF2Key']))
     keytext, _, valtext = flat.rstrip(' ').partition('*')
     if not valtext:
         raise DrmException('record has no KEY/VALUE separator')
@@ -391,7 +509,8 @@ def kinf2024MasterKey():
     return _kinf2024MasterKey
 
 # Routines unique to Mac and PC
-def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None):
+def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None,
+                     volumeSerial=None):
     """Kindle for PC 1.36+ .kinf2024 -> {name: plaintext}.
 
     Everything here except the NCrypt unwrap is pure computation, so master32 (the
@@ -402,6 +521,20 @@ def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None):
     with open(kInfoFile, 'rb') as fh:
         data = fh.read()
     recs = kinf2024Records(data)
+
+    # The F3/F2 keys come from the device's volume serial, not from the file.  Prefer an
+    # explicit serial, else recover them from the records, else fall back to the reference
+    # device's 467/2 (which is only right for serial 236943134).
+    keys = None
+    if volumeSerial is not None:
+        keys = obfKeysFromVolumeSerial(volumeSerial)
+    if keys is None:
+        keys = kinf2024RecoverKeys(recs)
+    if keys is None:
+        keys = obfKeysFromDwKey(KINF2024_DWKEY)
+        print('.kinf2024: could not recover the ObfuscatorV1 keys from the records; using the '
+              'reference-device dwF3_key=%d. Pass the volume serial if this is another machine.'
+              % KINF2024_DWKEY)
 
     storagedir = os.path.dirname(kInfoFile) or '.'
     if saltFile is None:
@@ -448,7 +581,7 @@ def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None):
     DB = {}
     for rec in recs:
         try:
-            keytext, valtext = kinf2024DecodeRecord(rec)
+            keytext, valtext = kinf2024DecodeRecord(rec, keys)
         except (DrmException, ValueError, IndexError):
             continue
         vb = decode(valtext.encode('latin1'), KINF2024_MAP)
@@ -459,11 +592,17 @@ def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None):
         DB[namehashmap.get(keytext.encode('latin1'), keytext.encode('latin1'))] = pt
 
     if not DB:
-        print('No .kinf2024 entry passed its GCM tag - wrong master key or salt.')
+        if volumeSerial is not None:
+            print('No .kinf2024 entry passed its GCM tag. The volume serial given with -V '
+                  '(%s) does not match this container -- drop -V and let the keys be recovered.'
+                  % volumeSerial)
+        else:
+            print('No .kinf2024 entry passed its GCM tag - wrong master key or salt.')
         return {}
     global _kinf2024MasterKey
     _kinf2024MasterKey = key
-    print('Decrypted .kinf2024: %d of %d entries, master key %s' % (len(DB), len(recs), how))
+    print('Decrypted .kinf2024: %d of %d entries, master key %s, ObfuscatorV1 dwF3_key=%d '
+          'dwF2_key=%d' % (len(DB), len(recs), how, keys['dwF3Key'], keys['dwF2Key']))
     if iswindows:
         DB[b'IDString'] = GetIDString().encode('utf-8')
         DB[b'UserName'] = GetUserName()
@@ -526,7 +665,7 @@ if iswindows:
 
     def GetIDString():
         vsn = GetVolumeSerialNumber()
-        #print('Using Volume Serial Number for ID: '+vsn)
+        print('Using Volume Serial Number for ID: '+vsn)
         return vsn
 
     def getLastError():
@@ -770,9 +909,9 @@ if iswindows:
 
     # determine type of kindle info provided and return a
     # database of keynames and values
-    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None):
+    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None, volumeSerial=None):
         if isKinf2024(kInfoFile):
-            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile)
+            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile, volumeSerial)
         names = [\
             b'kindle.account.tokens',\
             b'kindle.cookie.item',\
@@ -1126,9 +1265,9 @@ elif isosx:
 
     # determine type of kindle info provided and return a
     # database of keynames and values
-    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None):
+    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None, volumeSerial=None):
         if isKinf2024(kInfoFile):
-            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile)
+            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile, volumeSerial)
         names = [\
             b'kindle.account.tokens',\
             b'kindle.cookie.item',\
@@ -1302,18 +1441,18 @@ elif isosx:
             DB = {}
         return DB
 else:
-    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None):
+    def getDBfromFile(kInfoFile, master32=None, saltFile=None, blobFile=None, volumeSerial=None):
         if isKinf2024(kInfoFile):
-            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile)
+            return getDBfromFile2024(kInfoFile, master32, saltFile, blobFile, volumeSerial)
         raise DrmException("This script only runs under Windows or Mac OS X.")
         return {}
 
-def kindlekeys(files = [], master32=None, saltFile=None, blobFile=None):
+def kindlekeys(files = [], master32=None, saltFile=None, blobFile=None, volumeSerial=None):
     keys = []
     if files == []:
         files = getKindleInfoFiles()
     for file in files:
-        key = getDBfromFile(file, master32, saltFile, blobFile)
+        key = getDBfromFile(file, master32, saltFile, blobFile, volumeSerial)
         if key:
             # convert all values to hex, just in case.
             n_key = {}
@@ -1406,8 +1545,9 @@ def get_device_setting(name,book_root):
 
 # interface for Python DeDRM
 # returns single key or multiple keys, depending on path or file passed in
-def getkey(outpath, files=[], master32=None, saltFile=None, blobFile=None, dumpMaster=None):
-    keys = kindlekeys(files, master32, saltFile, blobFile)
+def getkey(outpath, files=[], master32=None, saltFile=None, blobFile=None, dumpMaster=None,
+             volumeSerial=None):
+    keys = kindlekeys(files, master32, saltFile, blobFile, volumeSerial)
     if dumpMaster and kinf2024MasterKey():
         try:
             with open(dumpMaster, 'wb') as f:
@@ -1441,13 +1581,20 @@ def usage(progname):
     print("Keys are saved to the current directory, or a specified output directory.")
     print("If a file name is passed instead of a directory, only the first key is saved, in that file.")
     print("Usage:")
-    print("    {0:s} [-h] [-k <kindle.info>] [-m hex] [-s salt] [-b blob] [--dump-master f] [<outpath>]".format(progname))
+    print("    {0:s} [-h] [-k <kindle.info>] [-m hex] [-s salt] [-b blob] [-V serial] [--dump-master f] [<outpath>]".format(progname))
     print("Options for Kindle for PC 1.36+ (.kinf2024):")
     print("  -m HEX | --master-key HEX   32-byte storage master key as 64 hex digits. Skips the")
     print("                              NCrypt unwrap of main_shared.blob, so the .kinf2024 file")
     print("                              can be decrypted on any machine that has the key.")
     print("  -s FILE | --salt-file FILE  main_shared.salt (default: alongside the .kinf2024 file).")
     print("  -b FILE | --blob-file FILE  main_shared.blob (default: alongside the .kinf2024 file).")
+    print("  -V N | --volume-serial N    Volume serial number, in DECIMAL, of the volume holding")
+    print("                              the Kindle storage root. ObfuscatorV1 derives its F3/F2")
+    print("                              keys from it: s = the serial as a decimal string,")
+    print("                              dwF3_key = sum of the bytes of s, dwF2_key = dwF3_key mod 5.")
+    print("                              Only needed for a container from another machine; otherwise")
+    print("                              the keys are recovered from the records. To read it back:")
+    print("                              PowerShell (Get-Volume -DriveLetter C).SerialNumber")
     print("  --dump-master FILE          Write the master key recovered from main_shared.blob to")
     print("                              FILE so later runs can use -m without the CNG key.")
 
@@ -1460,15 +1607,15 @@ def cli_main():
     print("{0} v{1}\nCopyright © 2010-2020 by some_updates, Apprentice Harper et al.".format(progname,__version__))
 
     try:
-        opts, args = getopt.getopt(argv[1:], "hk:m:s:b:",
-                                   ["master-key=", "salt-file=", "blob-file=", "dump-master="])
+        opts, args = getopt.getopt(argv[1:], "hk:m:s:b:V:",
+                                   ["master-key=", "salt-file=", "blob-file=", "dump-master=", "volume-serial="])
     except getopt.GetoptError as err:
         print("Error in options or arguments: {0}".format(err.args[0]))
         usage(progname)
         sys.exit(2)
 
     files = []
-    master32 = saltFile = blobFile = dumpMaster = None
+    master32 = saltFile = blobFile = dumpMaster = volumeSerial = None
     for o, a in opts:
         if o == "-h":
             usage(progname)
@@ -1483,6 +1630,8 @@ def cli_main():
             blobFile = a
         if o == "--dump-master":
             dumpMaster = a
+        if o in ("-V", "--volume-serial"):
+            volumeSerial = a
 
     if len(args) > 1:
         usage(progname)
@@ -1500,7 +1649,7 @@ def cli_main():
     # make sure the outpath is canonical
     outpath = os.path.realpath(os.path.normpath(outpath))
 
-    if not getkey(outpath, files, master32, saltFile, blobFile, dumpMaster):
+    if not getkey(outpath, files, master32, saltFile, blobFile, dumpMaster, volumeSerial):
         print("Could not retrieve Kindle for Mac/PC key.")
     return 0
 
