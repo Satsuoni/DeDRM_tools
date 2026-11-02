@@ -7,6 +7,7 @@ __license__ = 'GPL v3'
 # Standard Python modules.
 import os, sys
 import traceback
+import time
 
 
 #@@CALIBRE_COMPAT_CODE@@
@@ -26,7 +27,16 @@ class DeDRM_Prefs():
         else:
             JSON_PATH = json_path
 
-        self.dedrmprefs = JSONConfig(JSON_PATH)
+        # Calibre workers can initialize concurrently; retry transient Windows
+        # sharing violations without overwriting the existing preference file.
+        for attempt in range(6):
+            try:
+                self.dedrmprefs = JSONConfig(JSON_PATH)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
 
         self.dedrmprefs.defaults['configured'] = False
         self.dedrmprefs.defaults['deobfuscate_fonts'] = True
@@ -49,23 +59,23 @@ class DeDRM_Prefs():
         # to empty dictionaries and lists, otherwise we are unable to add to them
         # as then it just adds to the (memory only) dedrmprefs.defaults versions!
         if self.dedrmprefs['bandnkeys'] == {}:
-            self.dedrmprefs['bandnkeys'] = {}
+            dict.__setitem__(self.dedrmprefs, 'bandnkeys', {})
         if self.dedrmprefs['adeptkeys'] == {}:
-            self.dedrmprefs['adeptkeys'] = {}
+            dict.__setitem__(self.dedrmprefs, 'adeptkeys', {})
         if self.dedrmprefs['ereaderkeys'] == {}:
-            self.dedrmprefs['ereaderkeys'] = {}
+            dict.__setitem__(self.dedrmprefs, 'ereaderkeys', {})
         if self.dedrmprefs['kindlekeys'] == {}:
-            self.dedrmprefs['kindlekeys'] = {}
+            dict.__setitem__(self.dedrmprefs, 'kindlekeys', {})
         if self.dedrmprefs['androidkeys'] == {}:
-            self.dedrmprefs['androidkeys'] = {}
+            dict.__setitem__(self.dedrmprefs, 'androidkeys', {})
         if self.dedrmprefs['pids'] == []:
-            self.dedrmprefs['pids'] = []
+            dict.__setitem__(self.dedrmprefs, 'pids', [])
         if self.dedrmprefs['serials'] == []:
-            self.dedrmprefs['serials'] = []
+            dict.__setitem__(self.dedrmprefs, 'serials', [])
         if self.dedrmprefs['lcp_passphrases'] == []:
-            self.dedrmprefs['lcp_passphrases'] = []
+            dict.__setitem__(self.dedrmprefs, 'lcp_passphrases', [])
         if self.dedrmprefs['adobe_pdf_passphrases'] == []:
-            self.dedrmprefs['adobe_pdf_passphrases'] = []
+            dict.__setitem__(self.dedrmprefs, 'adobe_pdf_passphrases', [])
 
     def __getitem__(self,kind = None):
         if kind is not None:

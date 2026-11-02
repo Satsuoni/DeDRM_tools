@@ -170,7 +170,7 @@ def UnprotectHeaderData(encryptedData):
 #
 #   file      = <header> '#' rec0 '}' rec1 '}' ...
 #   reci      = reverse(base64std(payload)) + '8'
-#   record    = F5 Caesar strip -> base64 -> F4 LZW -> F3 permutation (dwKey 467)
+#   record    = F5 Caesar strip -> base64 -> F4 LZW -> F3 permutation (dwKey 468)
 #               -> B64Enc2 -> F2 rotate -> F1 transpose -> split on '*'
 #   KEY       = encodeHash(MD5(entry name), testMap8)   <- same scheme as .kinf2018
 #   VALUE     = A64( nonce(12) || ciphertext || tag(16) )          AES-256-GCM
@@ -184,9 +184,9 @@ def UnprotectHeaderData(encryptedData):
 
 # identical to the K4PC 1.9+ testMap8 already used above - the new format kept it
 KINF2024_MAP = b"YvaZ3FfUm9Nn_c1XuG4yCAzB0beVg-TtHh5SsIiR6rJjQdW2wEq7KkPpL8lOoMxD"
-KINF2024_DWKEY = 467          # ObfuscatorV1 F3 key
+KINF2024_DWKEY = 468          # ObfuscatorV1 F3 key
 KINF2024_F5_SHIFT = 1         # len(F5 key string) & 7
-KINF2024_F2_ROTATE = 2        # F2 key, from the decoder object at +0x0c
+KINF2024_F2_ROTATE = 3        # F2 key, from the decoder object at +0x0c
 KINF2024_INFO_STORAGE = b'kindle_ss'
 KINF2024_INFO_ENTRY = b'kindle_ss_token'
 
@@ -295,11 +295,16 @@ def obfF3Perm(L, dwKey=KINF2024_DWKEY):
 def obfB64Enc2(s):
     """ObfV1_B64Enc2: the 7-symbol alphabet {a..f, A, Z} back to a bit string.
     'Z' separates runs, a run of length rank(c)+1; 'xAy' emits (rank(x)+1) zeros
-    followed by (rank(y)+1) ones."""
+    followed by (rank(y)+1) ones; a terminal 'xA' is zeros only."""
     rank = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5}
     bits = []
-    for tok in s.split('Z'):
+    tokens = s.split('Z')
+    for index, tok in enumerate(tokens):
         if not tok:
+            continue
+        if index == len(tokens) - 1 and len(tok) == 2 and tok[0] in rank and tok[1] == 'A':
+            # An xA suffix encodes a final zero run without a following one run.
+            bits.append('0' * (rank[tok[0]] + 1))
             continue
         if len(tok) == 3 and tok[1] == 'A':
             if tok[0] not in rank or tok[2] not in rank:
@@ -421,7 +426,7 @@ def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None):
         try:
             key = bytes.fromhex(str(master32).replace('0x', '').replace(':', '').replace(' ', ''))
         except ValueError:
-            print('-m expects the master key as hex, got %r' % (master32,))
+            print('-m expects hexadecimal input (supplied content suppressed)')
             return {}
         if len(key) != 32:
             print('-m expects 32 bytes (64 hex digits), got %d bytes' % len(key))
@@ -660,7 +665,7 @@ if iswindows:
                     raw = string_at(out, cbres.value)
                     # the unwrap leaves the 32-byte key followed by zero padding
                     if len(raw) >= 32:
-                        print("Got blob: {}".format(raw[:32].hex()))
+                        print("CNG storage master unwrapped (content suppressed)")
                         return raw[:32]
                     print('NCryptDecrypt returned only %d bytes' % len(raw))
                 finally:

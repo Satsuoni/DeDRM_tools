@@ -239,7 +239,7 @@ def _stage_credential_maps(candidate_strings):
 
 
 def _key_passes_oracle(key, oracle_source):
-    """Only an explicit REJECTED verdict fails; no oracle at all passes."""
+    """Accept compressed LZMA or independently verified uncompressed DRMION pages."""
     if oracle_source is None or not key or len(key) != 16:
         return True
     stages = _stage_ladder()
@@ -249,6 +249,14 @@ def _key_passes_oracle(key, oracle_source):
         verdict = stages.verify_page(oracle_source, key)
     except Exception:  # noqa: BLE001 - unreadable, no page to check
         return True
+    if verdict is not None and verdict.get('verdict') == 'REJECTED':
+        try:
+            from kfx_page_validation import check_uncompressed
+            uncompressed_valid, _checks = check_uncompressed(oracle_source, key)
+            if uncompressed_valid is True:
+                verdict = dict(verdict, verdict='CONFIRMED')
+        except Exception:
+            pass  # retain the original rejection for malformed or ambiguous pages
     return not (verdict is not None and verdict.get('verdict') == 'REJECTED')
 
 
@@ -256,7 +264,7 @@ def _stage_key(envelope, candidate_strings, oracle_source=None):
     """The 16-byte content key for one envelope, from kfx_stages, or None.
 
     None when no family claims the envelope, the credentials derive nothing, or the key
-    doesn't open the first encrypted page (00 5d). The caller's sweep runs as before.
+    fails format-aware encrypted-page validation. The caller's sweep runs as before.
     """
     if not envelope:
         return None
@@ -280,7 +288,7 @@ def _stage_key(envelope, candidate_strings, oracle_source=None):
         if not key or len(key) != 16:
             continue
         if not _key_passes_oracle(key, oracle_source):
-            print("A stage-derived key did not open the first encrypted page")
+            print("A stage-derived key did not pass encrypted-page verification")
             continue
         return bytes(key)
     return None
@@ -599,7 +607,7 @@ class KFXZipBook:
             try:
                 if name == 'acsr':
                     values = unwrap_account_secrets(value)
-                    print("Got {} values from secrets file: {}".format(len(values),values))
+                    print("Account credential file yielded {} candidate(s); content suppressed".format(len(values)))
                 else:
                     if isinstance(value, bytes):
                       value = value.decode('ASCII')

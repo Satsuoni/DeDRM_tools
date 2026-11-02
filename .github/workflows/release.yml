@@ -1,0 +1,69 @@
+name: Build and release DeDRM fork
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'jadehawk/DeDRM_tools'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Package release
+        run: python make_release.py
+
+      - name: Extract and verify Calibre plugin
+        run: |
+          python - <<'PY'
+          import zipfile
+
+          with zipfile.ZipFile('DeDRM_tools.zip') as bundle:
+              assert bundle.testzip() is None, 'Release archive failed CRC verification'
+              plugin_data = bundle.read('DeDRM_plugin.zip')
+          with open('DeDRM_plugin.zip', 'wb') as output:
+              output.write(plugin_data)
+          with zipfile.ZipFile('DeDRM_plugin.zip') as plugin:
+              assert plugin.testzip() is None, 'Calibre plugin failed CRC verification'
+              assert '__init__.py' in plugin.namelist(), 'Missing Calibre plugin entry point'
+          PY
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dedrm-packages
+          path: |
+            DeDRM_tools.zip
+            DeDRM_plugin.zip
+          if-no-files-found: error
+
+      - name: Publish release on this fork
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fork-build-${{ github.sha }}
+          target_commitish: ${{ github.sha }}
+          name: DeDRM fork build ${{ github.sha }}
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            Automated build from jadehawk/DeDRM_tools.
+
+            Unofficial fork build, not an upstream DeDRM release.
+            Install DeDRM_plugin.zip directly in Calibre.
+            DeDRM_tools.zip contains the full tools bundle.
+
+            Source commit: https://github.com/jadehawk/DeDRM_tools/commit/${{ github.sha }}
+          files: |
+            DeDRM_tools.zip
+            DeDRM_plugin.zip

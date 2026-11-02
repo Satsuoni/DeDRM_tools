@@ -1213,7 +1213,7 @@ def drilldown(t):
       deval=_b64decode_field(val)
       nxt.extend(drilldown([deval]))
     except Exception as e:
-      print("Exception for value {} : {}".format(val,e))
+      print("Credential decoding refused input; content suppressed; exception={}".format(type(e).__name__))
   return nxt
 
 def _is_secret_text(value):
