@@ -554,7 +554,7 @@ def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None,
         try:
             key = bytes.fromhex(str(master32).replace('0x', '').replace(':', '').replace(' ', ''))
         except ValueError:
-            print('-m expects the master key as hex, got %r' % (master32,))
+            print('-m expects a hexadecimal master key (supplied content suppressed)')
             return {}
         if len(key) != 32:
             print('-m expects 32 bytes (64 hex digits), got %d bytes' % len(key))
@@ -604,6 +604,23 @@ def getDBfromFile2024(kInfoFile, master32=None, saltFile=None, blobFile=None,
     print('Decrypted .kinf2024: %d of %d entries, master key %s, ObfuscatorV1 dwF3_key=%d '
           'dwF2_key=%d' % (len(DB), len(recs), how, keys['dwF3Key'], keys['dwF2Key']))
     if iswindows:
+        # The MSIX client ID lives in LocalState/registration_data, not in
+        # .kinf2024. The DPAPI blob is decryptable under the registered user's
+        # Windows account, without loading or patching the Kindle runtime.
+        if b'DSN' not in DB:
+            try:
+                try:
+                    from msix_registration import recover_registration_dsn
+                except ImportError:
+                    from .msix_registration import recover_registration_dsn
+                registration_dsn = recover_registration_dsn(kInfoFile)
+                if registration_dsn:
+                    DB[b'DSN'] = registration_dsn
+                    print('MSIX Kindle DSN recovered from registration_data (content suppressed)')
+                else:
+                    print('MSIX Kindle DSN unavailable from registration_data')
+            except Exception as e:
+                print('MSIX registration lookup failed: {}'.format(type(e).__name__))
         DB[b'IDString'] = GetIDString().encode('utf-8')
         DB[b'UserName'] = GetUserName()
     return DB
@@ -665,7 +682,7 @@ if iswindows:
 
     def GetIDString():
         vsn = GetVolumeSerialNumber()
-        print('Using Volume Serial Number for ID: '+vsn)
+        # Volume serial is device-specific; never print it in the plugin log.
         return vsn
 
     def getLastError():
@@ -799,7 +816,7 @@ if iswindows:
                     raw = string_at(out, cbres.value)
                     # the unwrap leaves the 32-byte key followed by zero padding
                     if len(raw) >= 32:
-                        print("Got blob: {}".format(raw[:32].hex()))
+                        print('CNG storage master unwrapped (content suppressed)')
                         return raw[:32]
                     print('NCryptDecrypt returned only %d bytes' % len(raw))
                 finally:

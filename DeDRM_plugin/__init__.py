@@ -966,22 +966,39 @@ class DeDRM(FileTypePlugin):
                 if keyvalue not in dedrmprefs['kindlekeys'].values():
                     newkeys["key_{0:d}".format(i)] = keyvalue
 
-            if len(newkeys) > 0:
-                print("{0} v{1}: Found {2} new {3}".format(PLUGIN_NAME, PLUGIN_VERSION, len(newkeys), "key" if len(newkeys)==1 else "keys"))
+            if newkeys:
+                print("{0} v{1}: Recovered {2} new local Kindle {3}".format(
+                    PLUGIN_NAME, PLUGIN_VERSION, len(newkeys),
+                    "key" if len(newkeys) == 1 else "keys"))
+                # Authenticated local registration data can be saved even when the
+                # current ebook is unsupported or damaged; do not lose it on failure.
                 try:
-                    book = k4mobidedrm.GetDecryptedBook(path_to_ebook,newkeys.items(),[],[],[],self.starttime,original_path=opath)
-                    decoded = True
-                    # store the new successful keys in the defaults
-                    print("{0} v{1}: Saving {2} new {3}".format(PLUGIN_NAME, PLUGIN_VERSION, len(newkeys), "key" if len(newkeys)==1 else "keys"))
                     i = 1
                     for keyvalue in newkeys.values():
                         while "kindle_key_{0:d}_{1:d}".format(int(time.time()), i) in dedrmprefs['kindlekeys']:
-                            i = i + 1
-                        dedrmprefs.addnamedvaluetoprefs('kindlekeys',"kindle_key_{0:d}_{1:d}".format(int(time.time()), i),keyvalue)
+                            i += 1
+                        dedrmprefs.addnamedvaluetoprefs(
+                            'kindlekeys',
+                            "kindle_key_{0:d}_{1:d}".format(int(time.time()), i),
+                            keyvalue)
                     dedrmprefs.writeprefs()
-                except Exception as e:
+                    print("{0} v{1}: Saved recovered local Kindle key(s)".format(
+                        PLUGIN_NAME, PLUGIN_VERSION))
+                except Exception:
+                    print("{0} v{1}: Could not save recovered Kindle keys".format(
+                        PLUGIN_NAME, PLUGIN_VERSION))
                     traceback.print_exc()
-                    pass
+
+                # Preserve the rest of the user's configured credentials on retry.
+                retry_keys = kindleDatabases + list(newkeys.items())
+                try:
+                    book = k4mobidedrm.GetDecryptedBook(
+                        path_to_ebook, retry_keys, androidFiles, serials, pids,
+                        self.starttime, dedrmprefs["kindleextrakeyfile"],
+                        dedrmprefs["remove_watermarks"], original_path=opath)
+                    decoded = True
+                except Exception:
+                    traceback.print_exc()
             if not decoded:
                 #if you reached here then no luck raise and exception
                 print("{0} v{1}: Ultimately failed to decrypt after {2:.1f} seconds. Read the FAQs at noDRM's repository: https://github.com/noDRM/DeDRM_tools/blob/master/FAQs.md".format(PLUGIN_NAME, PLUGIN_VERSION,time.time()-self.starttime))
