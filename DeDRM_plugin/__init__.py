@@ -1074,7 +1074,10 @@ class DeDRM(FileTypePlugin):
         return True
 
     def config_widget(self):
-        import config
+        try:
+          import config
+        except:
+          from . import config
         return config.ConfigWidget(self.plugin_path, self.alfdir)
 
     def save_settings(self, config_widget):

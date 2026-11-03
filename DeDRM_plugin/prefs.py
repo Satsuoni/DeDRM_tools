@@ -16,8 +16,10 @@ try:
     from calibre.utils.config import JSONConfig
 except:
     from standalone.jsonconfig import JSONConfig
-
-from __init__ import PLUGIN_NAME
+try:
+  from __init__ import PLUGIN_NAME
+except:
+  from . import PLUGIN_NAME
 
 class DeDRM_Prefs():
     def __init__(self, json_path=None):

@@ -26,13 +26,21 @@ from calibre.gui2 import (error_dialog, question_dialog, info_dialog, open_url,
 from calibre.utils.config import dynamic, config_dir, JSONConfig
 from calibre.constants import iswindows, isosx
 
+try:
+  from __init__ import PLUGIN_NAME, PLUGIN_VERSION
+  from __version import RESOURCE_NAME as help_file_name
+except:
+  from . import PLUGIN_NAME, PLUGIN_VERSION
+  from . import __version
+  help_file_name = __version.RESOURCE_NAME
 
-from __init__ import PLUGIN_NAME, PLUGIN_VERSION
-from __version import RESOURCE_NAME as help_file_name
 from .utilities import uStrCmp
-
-import prefs
-import androidkindlekey
+try:
+  import prefs
+  import androidkindlekey
+except:
+  from . import prefs
+  from . import androidkindlekey
 
 def checkForDeACSMkeys(): 
         try: 

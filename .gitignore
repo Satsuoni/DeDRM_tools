@@ -10,3 +10,5 @@ __pycache__/
 # make_release.py writes the combined DeDRM_tools_<version>.zip to the repository root
 # (the per-plugin zips go into release/, which it then deletes).
 /DeDRM_tools_*.zip
+
+Other_Tools/KRFKeyExtractor/*exe
