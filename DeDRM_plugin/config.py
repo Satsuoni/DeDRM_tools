@@ -267,8 +267,10 @@ class ConfigWidget(QWidget):
                 new_key_name = os.path.splitext(os.path.basename(filename))[0]
                 goodenough=False
                 cnt=3
+                linecnt=0
                 with open(fpath,'r') as keyfile:
                     for line in keyfile: #just check three
+                        linecnt+=1
                         sline=line.strip()
                         ls=sline.split("$")
                         #print(ls)
@@ -277,10 +279,12 @@ class ConfigWidget(QWidget):
                         cnt-=1
                         if cnt<=0:
                           break
-                if goodenough:
+                if goodenough or linecnt==0:
                     self.tempdedrmprefs['kindleextrakeyfile']=fpath
                     self._extrakeyfile_ledit.setText(fpath)
                     counter=1
+                    if linecnt==0:
+                      QMessageBox.warning(self, 'Warning', 'This file ('+fpath+') seems to be empty. Setting it as key storage for recovered keys only.')
                 else:
                   QMessageBox.warning(self, 'Warning', 'This file ('+fpath+') does not seem to contain keys')
         return counter > 0

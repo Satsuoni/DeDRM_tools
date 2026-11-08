@@ -1857,26 +1857,38 @@ def _heap_walk_order(n):
 
 
 class SKeyList(object):
-    def __init__(self, skeyfile):
-      self.keycandidates={}
-      self.secretkeys={} #let us hope there is one key per voucher...
-      if skeyfile is None: return
-      if os.path.isfile(skeyfile):
-          with open(skeyfile,"r",encoding="utf8") as fl:
-              for line in fl:
-                  sline=line.strip()
-                  if len(sline)<32: continue 
-                  lst=sline.split("$")
-                  if len(lst)<2: continue 
-                  voucherid=lst[0]
-                  for key in lst[1:]:
-                      skey=key.split(":")
-                      if skey[0]=="secret_key":
-                          self.secretkeys[voucherid]=bytes.fromhex(skey[1])
-                      elif skey[0]=="shared_key":
-                          curlist=self.keycandidates.get(voucherid,[])
-                          curlist.append(bytes.fromhex(skey[1]))
-                          self.keycandidates[voucherid]=curlist
+  def __init__(self, skeyfile):
+    self.keycandidates={}
+    self.secretkeys={} #let us hope there is one key per voucher...
+    if skeyfile is None: return
+    self.filename=None
+    if os.path.isfile(skeyfile):
+      self.filename=skeyfile
+      with open(skeyfile,"r",encoding="utf8") as fl:
+        for line in fl:
+          sline=line.strip()
+          if len(sline)<32: continue 
+          lst=sline.split("$")
+          if len(lst)<2: continue 
+          voucherid=lst[0]
+          for key in lst[1:]:
+              skey=key.split(":")
+              if skey[0]=="secret_key":
+                  self.secretkeys[voucherid]=bytes.fromhex(skey[1])
+              elif skey[0]=="shared_key":
+                  curlist=self.keycandidates.get(voucherid,[])
+                  curlist.append(bytes.fromhex(skey[1]))
+                  self.keycandidates[voucherid]=curlist
+  def registerKey(self,key,vouchid,keyid):
+    if self.filename is not None and os.path.isfile(self.filename):
+      if vouchid is not None and vouchid!="" and not vouchid in self.secretkeys:
+        with open(self.filename, "a") as file:
+          file.write("{}$secret_key:{}\n".format(vouchid,key.hex()))
+        self.secretkeys[vouchid]=key
+      if keyid is not None and keyid!="" and not keyid in self.secretkeys:
+        with open(self.filename, "a") as file:
+          file.write("{}$secret_key:{}\n".format(keyid,key.hex()))
+        self.secretkeys[keyid]=key
                           
 class DrmIonVoucher(object):
     envelope = None
@@ -2273,7 +2285,8 @@ class DrmIon(object):
         _assert(self.ion.next() == TID_SYMBOL and self.ion.gettypename() == "doctype", "Expected doctype symbol")
         _assert(self.ion.next() == TID_LIST and self.ion.gettypename() in ["com.amazon.drm.Envelope@1.0", "com.amazon.drm.Envelope@2.0"],
                 "Unknown type encountered in DRMION envelope, expected Envelope, got %s" % self.ion.gettypename())
-
+        cur_keyname=None
+        cur_vouchname=None
         while True:
             if self.ion.gettypename() == "enddoc":
                 break
@@ -2290,6 +2303,7 @@ class DrmIon(object):
                         if self.key is None or len(self.key)==0:
                             if fname=="encryption_key":
                                 keyname=self.ion.stringvalue()
+                                cur_keyname=keyname
                                 if self.skeylist is not None:
                                     self.key=self.skeylist.secretkeys.get(keyname,self.key) # i know they are supposed to be voucher ids, but it is easier to dump them all into one file, their UIDs are distinct anyway
                                     if self.key is not None and len(self.key)>10:
@@ -2301,6 +2315,7 @@ class DrmIon(object):
 
                         if self.vouchername == "":
                             self.vouchername = self.ion.stringvalue()
+                            cur_vouchname=self.vouchername
                             self.voucher = self.onvoucherrequired(self.vouchername)
                             if self.voucher is not None and self.voucher.secretkey is not None and len(self.voucher.secretkey)>0:
                                 self.key = self.voucher.secretkey
@@ -2329,6 +2344,9 @@ class DrmIon(object):
                     _assert(self.key is not None and len(self.key) > 0, "Unable to obtain secret key from voucher or keylist")
                     if ct is not None and civ is not None:
                         self.processpage(ct, civ, outpages, decompress, decrypt)
+                        #only for encrypted pages, this should only fire after a lot of checks
+                        if self.skeylist is not None:
+                          self.skeylist.registerKey(self.key,cur_vouchname,cur_keyname)
                     self.ion.stepout()
 
                 elif self.ion.gettypename() in ["com.amazon.drm.PlainText@1.0", "com.amazon.drm.PlainText@2.0"]:

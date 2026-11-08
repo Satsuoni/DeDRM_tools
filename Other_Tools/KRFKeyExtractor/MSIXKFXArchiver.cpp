@@ -2993,6 +2993,73 @@ ExecOffsets KindleReader1_1_4132()
     ret.new_approach = noffs;
     return ret;
 }
+
+ExecOffsets KindleReader1_1_5634()
+{
+    ExecOffsets ret;
+    ret.luceneaddr = 0x18116e6c0;
+
+
+    ret.make_storage = 0x180ec6e30;
+    ret.spatches.push_back(ppatch(0x180ec6e61, { 0xe9, 0xd3, 0x00, 0x00, 0x00 }));
+    ret.spatches.push_back(ppatch(0x180ec67cd, { 0xe9, 0xd3, 0x00, 0x00, 0x00 }));
+    ret.get_plugin_man = 0x18117fee0;
+    ret.load_all = 0x18117ffc0;
+    ret.get_storage_value = 0x18006eed0;
+    ret.deobfuscate_storage = 0x18006e700;
+
+
+    ret.drm_provider = 0x181195280;
+    ret.get_factory = 0x181194e60;
+    ret.open_book = 0x181194f10;
+
+
+
+
+    ret.mbox_size_bare = 0x1d198;
+    //ret.mbox_iv_offset = 0x1d180;
+
+    ret.decr_offset = 0x181e89bf0;
+    ret.mbox_size = 0x1d1c0;//0x1d1ac
+
+    ret.mbox_iv_offset = 0x1d180;
+
+    ret.decr_offset_bare = 0x101d27e0;//0x1802019c0
+    ret.t_bare = 0x182d1a5a0;
+    ret.o_bare = 30;
+
+
+    ret.allemaric_shift = 12;
+
+
+    ret.version = "AMZNKindle.AmazonKindleReadingApp_1.1.5634";
+    ret.vernum = 9;
+
+    ret.entry = 0;
+    NewFuncs noffs;
+    noffs.build_tables = 0x1802092e0;
+    noffs.var_init_0 = 0x181312100;
+    noffs.var_init_1 = 0x1802002d0;
+    noffs.mutex_insitu = 0x18235607d;
+    noffs.get_configblock = 0x180150910;
+    noffs.get_provider = 0x180150a50;
+    noffs.get_context = 0x180152de0;
+    noffs.decrypt_secrets = 0x1801e3a10;
+    noffs.init_drmdata = 0x1801c0740;
+    noffs.read_voucher = 0x180179a10;
+    noffs.populate_key = 0x1801779b0;
+    noffs.expand_key = 0x1801fc150;
+    noffs.fill_whitebox = 0x1801f8f60;
+    noffs.wb_size = 0x32238;
+    noffs.wb_offset = 0x1c000;
+    noffs.wb_stride = 4096;
+    noffs.m_slot = { 0x51, 0xeb, 0x3e, 0xbc, 0x41, 0xa3, 0x83, 0x20, 0x69, 0xb3, 0x36, 0xf5, 0xf4, 0x71, 0x28, 0xaa };
+    noffs.secondary = { 0x71, 0x7d, 0x6a, 0x7e, 0x21, 0x3e, 0x74, 0x62, 0x7d, 0x3d, 0x66, 0x7f, 0x65, 0x73, 0x78, 0x75 };
+    ret.is_new = true;
+    ret.skip_hooks = true;
+    ret.new_approach = noffs;
+    return ret;
+}
 #endif
 struct IATRESULTS
 {
@@ -7489,6 +7556,7 @@ int wmain(int argc, wchar_t* argv[])
     supportMap["e8d7579f15e15451be300021306ef2af"] = KindleReader1_0_25218();
     supportMap["02a3af2c8f5de71d1c9101f150e97f27"] = KindleReader1_1_3824();
     supportMap["3233c42bf1633ad393609fe204a9e212"] = KindleReader1_1_4132();
+    supportMap["adad02c09c6220bfd286c4ab9e46ccea"] = KindleReader1_1_5634();
     
 #endif
 
