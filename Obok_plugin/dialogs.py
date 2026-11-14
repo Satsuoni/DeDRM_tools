@@ -8,6 +8,9 @@ __docformat__ = 'restructuredtext en'
 TEXT_DRM_FREE = ' (*: drm - free)'
 LAB_DRM_FREE = '* : drm - free'
 
+import os
+import time
+
 try:
     from PyQt5.Qt import (Qt, QVBoxLayout, QLabel, QApplication, QGroupBox, 
                           QDialogButtonBox, QHBoxLayout, QTextBrowser, QProgressDialog, 
@@ -143,9 +146,10 @@ class BookListTableWidget(QTableWidget):
         self.clear()
         self.setAlternatingRowColors(True)
         self.setRowCount(len(books))
-        header_labels = ['DRM', _('Title'), _('Author'), _('Series'), 'book_id']
+        header_labels = ['DRM', _('Title'), _('Downloaded'), _('Author'), _('Series'), 'book_id']
         self.setColumnCount(len(header_labels))
         self.setHorizontalHeaderLabels(header_labels)
+        self.horizontalHeaderItem(2).setToolTip(_('Date the book file was downloaded to this computer or device.'))
         self.verticalHeader().setDefaultSectionSize(24)
         self.horizontalHeader().setStretchLastSection(True)
 
@@ -157,11 +161,11 @@ class BookListTableWidget(QTableWidget):
         self.setSortingEnabled(False)
         self.resizeColumnsToContents()
         self.setMinimumColumnWidth(1, 100)
-        self.setMinimumColumnWidth(2, 100)
+        self.setMinimumColumnWidth(3, 100)
         self.setMinimumSize(300, 0)
         if len(books) > 0:
             self.selectRow(0)
-        self.hideColumn(4)
+        self.hideColumn(5)
         self.setSortingEnabled(True)
 
     def setMinimumColumnWidth(self, col, minimum):
@@ -180,9 +184,19 @@ class BookListTableWidget(QTableWidget):
         status_cell.setData(Qt.UserRole, val)
         self.setItem(row, 0, status_cell)
         self.setItem(row, 1, ReadOnlyTableWidgetItem(book.title))
-        self.setItem(row, 2, AuthorTableWidgetItem(book.author, book.author))
-        self.setItem(row, 3, SeriesTableWidgetItem(book.series, book.series_index))
-        self.setItem(row, 4, NumericTableWidgetItem(row))
+        self.setItem(row, 2, DateTableWidgetItem(self.get_download_time(book)))
+        self.setItem(row, 3, AuthorTableWidgetItem(book.author, book.author))
+        self.setItem(row, 4, SeriesTableWidgetItem(book.series, book.series_index))
+        self.setItem(row, 5, NumericTableWidgetItem(row))
+
+    def get_download_time(self, book):
+        # The Kobo database does not store a reliable download or purchase date,
+        # so use the modification time of the downloaded book file instead.
+        # Books that have not been downloaded yet have no file and get no date.
+        try:
+            return os.path.getmtime(book.filename)
+        except (OSError, TypeError):
+            return None
 
     def get_books(self):
 #        debug_print("BookListTableWidget:get_books - self.books:", self.books)
@@ -191,7 +205,7 @@ class BookListTableWidget(QTableWidget):
             for row in range(self.rowCount()):
 #                debug_print("BookListTableWidget:get_books - row:", row)
                 if self.item(row, 0).isSelected():
-                    book_num = convert_qvariant(self.item(row, 4).data(Qt.DisplayRole))
+                    book_num = convert_qvariant(self.item(row, 5).data(Qt.DisplayRole))
                     debug_print("BookListTableWidget:get_books - book_num:", book_num)
                     book = self.books[book_num]
                     debug_print("BookListTableWidget:get_books - book:", book.title)
@@ -416,6 +430,18 @@ class AuthorTableWidgetItem(ReadOnlyTableWidgetItem):
     def __init__(self, text, sort_key):
         ReadOnlyTableWidgetItem.__init__(self, text)
         self.sort_key = sort_key
+
+    #Qt uses a simple < check for sorting items, override this to use the sortKey
+    def __lt__(self, other):
+        return self.sort_key < other.sort_key
+
+class DateTableWidgetItem(ReadOnlyTableWidgetItem):
+    def __init__(self, timestamp):
+        display = ''
+        if timestamp:
+            display = time.strftime('%Y-%m-%d %H:%M', time.localtime(timestamp))
+        ReadOnlyTableWidgetItem.__init__(self, display)
+        self.sort_key = timestamp or 0
 
     #Qt uses a simple < check for sorting items, override this to use the sortKey
     def __lt__(self, other):

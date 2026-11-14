@@ -89,6 +89,16 @@ msgstr "Autor"
 msgid "Series"
 msgstr "Reihe"
 
+#: dialogs.py:149
+msgid "Downloaded"
+msgstr "Heruntergeladen"
+
+#: dialogs.py:152
+msgid "Date the book file was downloaded to this computer or device."
+msgstr ""
+"Datum, an dem die Buchdatei auf diesen Computer oder dieses Gerät "
+"heruntergeladen wurde."
+
 #: dialogs.py:362
 msgid "Copy to clipboard"
 msgstr "In Zwischenablage kopieren"
