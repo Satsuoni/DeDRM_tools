@@ -3,7 +3,7 @@ from __future__ import (unicode_literals, division, absolute_import,
                         print_function)
 
 __license__   = 'GPL v3'
-__version__ = '10.0.9'
+__version__ = '10.0.36'
 __docformat__ = 'restructuredtext en'
 
 #####################################################################
