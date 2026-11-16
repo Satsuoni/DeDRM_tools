@@ -89,6 +89,16 @@ msgstr "Auteur"
 msgid "Series"
 msgstr "Reeks/serie"
 
+#: dialogs.py:149
+msgid "Downloaded"
+msgstr "Gedownload"
+
+#: dialogs.py:152
+msgid "Date the book file was downloaded to this computer or device."
+msgstr ""
+"Datum waarop het boekbestand naar deze computer of dit apparaat is "
+"gedownload."
+
 #: dialogs.py:362
 msgid "Copy to clipboard"
 msgstr "Naar het Klembord kopiëren"

@@ -336,6 +336,16 @@ msgstr "Autor"
 msgid "Series"
 msgstr "Série"
 
+#: dialogs.py:149
+msgid "Downloaded"
+msgstr "Descarregado"
+
+#: dialogs.py:152
+msgid "Date the book file was downloaded to this computer or device."
+msgstr ""
+"Data em que o ficheiro do livro foi descarregado para este computador ou "
+"dispositivo."
+
 #: I:\Herramientas\PoeditPortable\App\Poedit\bin\obok_plugin-3.1.0_trad\dialogs.py:369
 msgid "Copy to clipboard"
 msgstr "Copiar para a área de transferência"

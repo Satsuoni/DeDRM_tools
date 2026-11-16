@@ -339,6 +339,14 @@ msgstr "Författare"
 msgid "Series"
 msgstr "Serier"
 
+#: dialogs.py:149
+msgid "Downloaded"
+msgstr "Nedladdad"
+
+#: dialogs.py:152
+msgid "Date the book file was downloaded to this computer or device."
+msgstr "Datum då bokfilen laddades ned till den här datorn eller enheten."
+
 #: I:\Herramientas\PoeditPortable\App\Poedit\bin\obok_plugin-3.1.0_trad\dialogs.py:369
 msgid "Copy to clipboard"
 msgstr "Kopiera till urklipp"
