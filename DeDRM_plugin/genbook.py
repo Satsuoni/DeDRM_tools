@@ -36,20 +36,20 @@ def readEncodedNumber(file):
     c = file.read(1)
     if (len(c) == 0):
         return None
-    data = ord(c)
+    data = c[0]
     if data == 0xFF:
         flag = True
         c = file.read(1)
         if (len(c) == 0):
             return None
-        data = ord(c)
+        data = c[0]
     if data >= 0x80:
         datax = (data & 0x7F)
         while data >= 0x80 :
             c = file.read(1)
             if (len(c) == 0):
                 return None
-            data = ord(c)
+            data = c[0]
             datax = (datax <<7) + (data & 0x7F)
         data = datax
     if flag:
@@ -66,20 +66,24 @@ def readString(file):
         return None
     sv = file.read(stringLength)
     if (len(sv)  != stringLength):
-        return ""
+        return b""
     return unpack(str(stringLength)+"s",sv)[0]
 
 def getMetaArray(metaFile):
-    # parse the meta file
+    """Parse the Topaz metadata file into a dict of str -> str.
+
+    readString() yields bytes; the metadata is used to build text documents
+    (OPF, XHTML), so it is decoded to str here, once.
+    """
     result = {}
-    fo = open(metaFile,'rb')
-    size = readEncodedNumber(fo)
-    for i in range(size):
-        tag = readString(fo)
-        value = readString(fo)
-        result[tag] = value
-        # print(tag, value)
-    fo.close()
+    with open(metaFile,'rb') as fo:
+        size = readEncodedNumber(fo)
+        for i in range(size):
+            tag = readString(fo)
+            value = readString(fo)
+            if tag is None or value is None:
+                break
+            result[tag.decode('utf-8', 'replace')] = value.decode('utf-8', 'replace')
     return result
 
 
@@ -346,7 +350,7 @@ def generateBook(bookDir, raw, fixedimage):
             mlst.append('<meta name="' + key + '" content="' + meta_array[key] + '" />\n')
         metastr = "".join(mlst)
         mlst = None
-        open(xname, 'wb').write(metastr)
+        open(xname, 'w').write(metastr)
 
     print('Processing StyleSheet')
 
@@ -615,16 +619,16 @@ def generateBook(bookDir, raw, fixedimage):
     olst.append('<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="guid_id">\n')
     # adding metadata
     olst.append('   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">\n')
-    if b'GUID' in meta_array:
-        olst.append('      <dc:identifier opf:scheme="GUID" id="guid_id">' + meta_array[b'GUID'].decode('utf-8') + '</dc:identifier>\n')
-    if b'ASIN' in meta_array:
-        olst.append('      <dc:identifier opf:scheme="ASIN">' + meta_array[b'ASIN'].decode('utf-8') + '</dc:identifier>\n')
-    if b'oASIN' in meta_array:
-        olst.append('      <dc:identifier opf:scheme="oASIN">' + meta_array[b'oASIN'].decode('utf-8') + '</dc:identifier>\n')
-    olst.append('      <dc:title>' + meta_array[b'Title'].decode('utf-8') + '</dc:title>\n')
-    olst.append('      <dc:creator opf:role="aut">' + meta_array[b'Authors'].decode('utf-8') + '</dc:creator>\n')
+    if 'GUID' in meta_array:
+        olst.append('      <dc:identifier opf:scheme="GUID" id="guid_id">' + meta_array['GUID'] + '</dc:identifier>\n')
+    if 'ASIN' in meta_array:
+        olst.append('      <dc:identifier opf:scheme="ASIN">' + meta_array['ASIN'] + '</dc:identifier>\n')
+    if 'oASIN' in meta_array:
+        olst.append('      <dc:identifier opf:scheme="oASIN">' + meta_array['oASIN'] + '</dc:identifier>\n')
+    olst.append('      <dc:title>' + meta_array['Title'] + '</dc:title>\n')
+    olst.append('      <dc:creator opf:role="aut">' + meta_array['Authors'] + '</dc:creator>\n')
     olst.append('      <dc:language>en</dc:language>\n')
-    olst.append('      <dc:date>' + meta_array[b'UpdateTime'].decode('utf-8') + '</dc:date>\n')
+    olst.append('      <dc:date>' + meta_array.get('UpdateTime', '') + '</dc:date>\n')
     if isCover:
         olst.append('      <meta name="cover" content="bookcover"/>\n')
     olst.append('   </metadata>\n')

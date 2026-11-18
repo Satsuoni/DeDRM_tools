@@ -72,7 +72,7 @@ def encodeHash(data,map):
 
 # Decode the string in data with the characters in map. Returns the decoded bytes
 def decode(data,map):
-    result = ''
+    result = b''
     for i in range (0,len(data)-1,2):
         high = map.find(data[i])
         low = map.find(data[i+1])
@@ -449,14 +449,14 @@ def getPidList(md1, md2, serials=[], kDatabases=[]):
         try:
             pidlst.extend(map(bytes,getK4Pids(md1, md2, kDatabase)))
         except Exception as e:
-            print("Error getting PIDs from database {0}: {1}".format(kDatabase[0],e.args[0]))
+            print("Error getting PIDs from database {0}: {1}".format(kDatabase[0],str(e)))
             traceback.print_exc()
 
     for serialnum in serials:
         try:
             pidlst.extend(map(bytes,getKindlePids(md1, md2, serialnum)))
         except Exception as e:
-            print("Error getting PIDs from serial number {0}: {1}".format(serialnum ,e.args[0]))
+            print("Error getting PIDs from serial number {0}: {1}".format(serialnum ,str(e)))
             traceback.print_exc()
 
     return pidlst

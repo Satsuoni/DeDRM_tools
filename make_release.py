@@ -17,6 +17,7 @@ DEDRM_SRC_DIR = 'DeDRM_plugin'
 DEDRM_SRC_TMP_DIR = 'DeDRM_plugin_temp'
 DEDRM_README= 'DeDRM_plugin_ReadMe.txt'
 OBOK_SRC_DIR = 'Obok_plugin'
+OBOK_SRC_TMP_DIR = 'Obok_plugin_temp'
 OBOK_README = 'obok_plugin_ReadMe.txt'
 KRFTool="Other_Tools/KRFKeyExtractor/KRFKeyExtractor.exe"
 KRFTool28="Other_Tools/KRFKeyExtractor/KFXKeyExtractor28.exe"
@@ -33,6 +34,11 @@ KRFFridaAgent="Other_Tools/KRFKeyExtractor/compiled_agent.js"
 
 
 RELEASE_DIR = 'release'
+
+# Never ship these from the working tree (caches, editor/OS droppings, patch leftovers).
+EXCLUDED_DIRS = ('__pycache__', '.pytest_cache', '.mypy_cache')
+EXCLUDED_FILE_SUFFIXES = ('.pyc', '.pyo', '.tmp', '.orig', '.rej', '.swp')
+EXCLUDED_FILE_NAMES = ('.DS_Store', 'Thumbs.db')
 
 def patch_file(filepath):
     f = open(filepath, "rb")
@@ -57,37 +63,40 @@ def patch_file(filepath):
 
 
 
-def make_release(version):
-    try:
-        shutil.rmtree(RELEASE_DIR)
-    except:
-        pass
-    try:
-        shutil.rmtree(DEDRM_SRC_TMP_DIR)
-    except:
-        pass
+def _ignore_junk(directory, names):
+    """shutil.copytree ignore callback: drop caches and stray files."""
+    return [n for n in names
+            if n in EXCLUDED_DIRS
+            or n in EXCLUDED_FILE_NAMES
+            or n.endswith(EXCLUDED_FILE_SUFFIXES)]
 
+
+def make_plugin_zip(src_dir, tmp_dir, apply_compat_patch):
+    """Build <src_dir>.zip from a cleaned temporary copy of src_dir.
+
+    The source tree is never zipped directly, so caches or leftovers from a
+    crashed run cannot end up in the release. Returns the zip file name.
+    """
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    shutil.copytree(src_dir, tmp_dir, ignore=_ignore_junk)
+    try:
+        if apply_compat_patch:
+            for root, dirs, files in os.walk(tmp_dir):
+                for name in files:
+                    if name.endswith(".py"):
+                        patch_file(os.path.join(root, name))
+        return shutil.make_archive(src_dir, 'zip', tmp_dir)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def make_release(version):
+    shutil.rmtree(RELEASE_DIR, ignore_errors=True)
     os.mkdir(RELEASE_DIR)
 
-    # Copy folder 
-    shutil.copytree(DEDRM_SRC_DIR, DEDRM_SRC_TMP_DIR)
-
-    # Modify folder
-    try: 
-        shutil.rmtree(os.path.join(os.path.abspath(DEDRM_SRC_TMP_DIR), "__pycache__"))
-    except:
-        pass
-
-    # Patch file to add compat code.
-    for root, dirs, files in os.walk(DEDRM_SRC_TMP_DIR):
-        for name in files:
-            if name.endswith(".py"):
-                patch_file(os.path.join(root, name))
-
-
-    # Package
-    shutil.make_archive(DEDRM_SRC_DIR, 'zip', DEDRM_SRC_TMP_DIR)
-    shutil.make_archive(OBOK_SRC_DIR, 'zip', OBOK_SRC_DIR)
+    # Package both plugins from cleaned temporary copies.
+    make_plugin_zip(DEDRM_SRC_DIR, DEDRM_SRC_TMP_DIR, apply_compat_patch=True)
+    make_plugin_zip(OBOK_SRC_DIR, OBOK_SRC_TMP_DIR, apply_compat_patch=False)
     shutil.move(DEDRM_SRC_DIR+'.zip', RELEASE_DIR)
     shutil.move(OBOK_SRC_DIR+'.zip', RELEASE_DIR)
     shutil.copy(DEDRM_README, RELEASE_DIR)
@@ -139,18 +148,12 @@ def make_release(version):
 
     shutil.copy("ReadMe_Overview.txt", RELEASE_DIR)
 
-    # Remove temp folder:
-    shutil.rmtree(DEDRM_SRC_TMP_DIR)
-
     if version is not None:
         release_name = 'DeDRM_tools_{}'.format(version)
     else:
         release_name = 'DeDRM_tools'
     result = shutil.make_archive(release_name, 'zip', RELEASE_DIR)
-    try:
-        shutil.rmtree(RELEASE_DIR)
-    except:
-        pass
+    shutil.rmtree(RELEASE_DIR, ignore_errors=True)
     return result
 
 

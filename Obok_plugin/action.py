@@ -2,11 +2,10 @@
 # -*- coding: utf-8 -*-
 # vim:fileencoding=UTF-8:ts=4:sw=4:sta:et:sts=4:ai
 
-_license__   = 'GPL v3'
+__license__  = 'GPL v3'
 __docformat__ = 'restructuredtext en'
 
 
-import codecs
 import os, traceback, zipfile
 
 try:
@@ -32,7 +31,7 @@ from calibre_plugins.obok_dedrm.utilities import (
                             debug_print
                             )
 
-from calibre_plugins.obok_dedrm.obok.obok import KoboLibrary
+from calibre_plugins.obok_dedrm.obok.obok import KoboLibrary, redact_key
 from calibre_plugins.obok_dedrm.obok.legacy_obok import legacy_obok
 
 PLUGIN_ICONS = ['images/obok.png']
@@ -114,7 +113,7 @@ class InterfacePluginAction(InterfaceAction):
         # Check to see if a key can be retrieved using the legacy obok method.
         legacy_key = legacy_obok().get_legacy_cookie_id
         if legacy_key is not None:
-            print (_('Legacy key found: '), legacy_key.encode('hex_codec'))
+            print (_('Legacy key found: '), redact_key(legacy_key))
             self.userkeys.append(legacy_key)
         # Add userkeys found through the normal obok method to the list to try.
         try:
@@ -381,7 +380,7 @@ class InterfacePluginAction(InterfaceAction):
             return result
         #print ('Kobo library filename: {0}'.format(book.filename))
         for userkey in self.userkeys:
-            print (_('Trying key: '), codecs.encode(userkey, 'hex'))
+            print (_('Trying key: '), redact_key(userkey))
             try:
                 fileout = PersistentTemporaryFile('.epub', dir=self.tdir)
                 #print ('Temp file: {0}'.format(fileout.name))
@@ -418,7 +417,6 @@ class InterfacePluginAction(InterfaceAction):
                 print (_('Unknown Error decrypting, trying next key..'))
                 zout.close()
                 continue
-        result['fileobj'] = book.filename
         zin.close()
         return result
 
