@@ -60,7 +60,7 @@ def unpad(data, padding=16):
 
 def pad(data, padding_len=16):
     padding_data_len = padding_len - (len(data) % padding_len)
-    plaintext = data + bytes([padding_data_len]) * padding_data_len
+    plaintext = data + bytes(bytearray([padding_data_len])) * padding_data_len
     return plaintext
 
 class AndroidObfuscation(object):
@@ -128,10 +128,12 @@ def get_serials1(path=STORAGE1):
 
     def get_value(key):
         # encrypt() yields hex bytes; the XML keys/values are str
-        encrypted_key = obfuscation.encrypt(key).decode('ascii')
+        raw_encrypted = obfuscation.encrypt(key)
+        encrypted_key = raw_encrypted if isinstance(raw_encrypted, str) else raw_encrypted.decode('ascii')
         encrypted_value = storage.get(encrypted_key)
         if encrypted_value:
-            return obfuscation.decrypt(encrypted_value).decode('utf-8', 'replace')
+            raw_dec= obfuscation.decrypt(encrypted_value)
+            return raw_dec if isinstance(raw_dec, str) else raw_dec.decode('utf-8', 'replace')
         return ''
 
     # also see getK4Pids in kgenpids.py
