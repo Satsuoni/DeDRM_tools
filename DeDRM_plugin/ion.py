@@ -32,6 +32,16 @@ __version__ = '3.0'
 
 #@@CALIBRE_COMPAT_CODE@@
 
+try:
+    import builtins
+except ImportError:
+    import __builtin__ as builtins
+
+def bord(x):
+    if isinstance(x, int):
+        return x & 0xff
+    return builtins.ord(x)
+
 
 try:
     from Cryptodome.Cipher import AES
@@ -450,7 +460,7 @@ class BinaryIonParser(object):
         _assert(self.localremaining <= 8, "Decimal overflow")
 
         signed = False
-        b = list(self.read(self.localremaining))
+        b = [bord(x) for x in self.read(self.localremaining)]
         if (b[0] & 0x80) != 0:
             b[0] = b[0] & 0x7F
             signed = True
@@ -687,7 +697,7 @@ class BinaryIonParser(object):
 
         result = ""
         for i in b:
-            result += ("%02x " % i)
+            result += ("%02x " % bord(i))
 
         if len(result) > 0:
             result = result[:-1]
