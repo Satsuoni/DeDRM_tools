@@ -22,6 +22,18 @@ from lxml import etree
 import re
 from os.path import basename
 
+
+try:
+    import builtins
+except ImportError:
+    import __builtin__ as builtins
+
+def bord(x):
+    """Cross-version ord() accepting 1-char strings, 1-byte bytes, or ints."""
+    if isinstance(x, int):
+        return x & 0xff
+    return builtins.ord(x)
+    
 # Runs a RegEx over all HTML/XHTML files to remove watermakrs.
 def removeHTMLwatermarks(object, path_to_ebook):
     try: 
@@ -139,7 +151,7 @@ def removeHTMLwatermarks(object, path_to_ebook):
                         zi.create_system = oldzi.create_system
                         zi.create_version = oldzi.create_version
 
-                        if any(ord(c) >= 128 for c in path) or any(c >= 128 for c in zi.comment):
+                        if any(bord(c) >= 128 for c in path) or any(bord(c) >= 128 for c in zi.comment):
                             # If the file name or the comment contains any non-ASCII char, set the UTF8-flag
                             zi.flag_bits |= 0x800
                     except:
