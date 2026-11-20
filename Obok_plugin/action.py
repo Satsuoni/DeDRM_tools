@@ -7,6 +7,7 @@ __docformat__ = 'restructuredtext en'
 
 
 import os, traceback, zipfile
+import binascii
 
 try:
     from PyQt5.Qt import QToolButton, QUrl
@@ -31,7 +32,7 @@ from calibre_plugins.obok_dedrm.utilities import (
                             debug_print
                             )
 
-from calibre_plugins.obok_dedrm.obok.obok import KoboLibrary, redact_key
+from calibre_plugins.obok_dedrm.obok.obok import KoboLibrary
 from calibre_plugins.obok_dedrm.obok.legacy_obok import legacy_obok
 
 PLUGIN_ICONS = ['images/obok.png']
@@ -43,6 +44,11 @@ except NameError:
     debug_print("obok::action_err.py - exception when loading translations")
     pass # load_translations() added in calibre 1.9
 
+def bhex(smth):
+    if not isinstance(smth, (bytes, bytearray)):
+      smth = smth.encode('latin-1')
+    return binascii.hexlify(smth)
+    
 class InterfacePluginAction(InterfaceAction):
     name = PLUGIN_NAME
     action_spec = (PLUGIN_NAME, None,
@@ -113,7 +119,7 @@ class InterfacePluginAction(InterfaceAction):
         # Check to see if a key can be retrieved using the legacy obok method.
         legacy_key = legacy_obok().get_legacy_cookie_id
         if legacy_key is not None:
-            print (_('Legacy key found: '), redact_key(legacy_key))
+            print (_('Legacy key found: '), bhex(legacy_key))
             self.userkeys.append(legacy_key)
         # Add userkeys found through the normal obok method to the list to try.
         try:
@@ -380,7 +386,7 @@ class InterfacePluginAction(InterfaceAction):
             return result
         #print ('Kobo library filename: {0}'.format(book.filename))
         for userkey in self.userkeys:
-            print (_('Trying key: '), redact_key(userkey))
+            print (_('Trying key: '), bhex(userkey))
             try:
                 fileout = PersistentTemporaryFile('.epub', dir=self.tdir)
                 #print ('Temp file: {0}'.format(fileout.name))
