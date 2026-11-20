@@ -87,6 +87,17 @@ isosx = sys.platform.startswith('darwin')
 
 
 
+try:
+    import builtins
+except ImportError:
+    import __builtin__ as builtins
+
+def bord(x):
+    """Cross-version ord() accepting 1-char strings, 1-byte bytes, or ints."""
+    if isinstance(x, int):
+        return x & 0xff
+    return builtins.ord(x)
+    
 import logging
 
 logging.basicConfig()
@@ -327,7 +338,7 @@ class EreaderProcessor(object):
             des = DES.new(fixKey(self.content_key), DES.MODE_ECB)
             for i in range(1,self.num_footnote_pages):
                 logging.debug('get footnotepage %d', i)
-                id_len = fnote_ids[2]
+                id_len = bord(fnote_ids[2])
                 id = fnote_ids[3:3+id_len]
                 fmarker = b'<footnote id="' + id + b'">\n'
                 fmarker += zlib.decompress(des.decrypt(self.section_reader(self.first_footnote_page + i)))
@@ -350,7 +361,7 @@ class EreaderProcessor(object):
             # the remaining records of the sidebar sections need to be decoded with the content_key and zlib inflated
             des = DES.new(fixKey(self.content_key), DES.MODE_ECB)
             for i in range(1,self.num_sidebar_pages):
-                id_len = sbar_ids[2]
+                id_len = bord(sbar_ids[2])
                 id = sbar_ids[3:3+id_len]
                 smarker = b'<sidebar id="' + id + b'">\n'
                 smarker += zlib.decompress(des.decrypt(self.section_reader(self.first_sidebar_page + i)))
