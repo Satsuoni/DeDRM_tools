@@ -44,5 +44,8 @@ def unicode_argv(default_name):
         return [ default_name ]
     else:
         argvencoding = sys.stdin.encoding or "utf-8"
-        return [arg if isinstance(arg, str) else str(arg, argvencoding) for arg in sys.argv]
+        try:
+          return [arg if (isinstance(arg, str) or isinstance(arg,unicode)) else str(arg, argvencoding) for arg in sys.argv]
+        except NameError:
+          return [arg if isinstance(arg, str) else str(arg, argvencoding) for arg in sys.argv]
 
