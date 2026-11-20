@@ -35,6 +35,17 @@ except: #python sure became weirder with time
 
   from argv_utils import unicode_argv
 
+try:
+    import builtins
+except ImportError:
+    import __builtin__ as builtins
+
+def bord(x):
+    """Cross-version ord() accepting 1-char strings, 1-byte bytes, or ints."""
+    if isinstance(x, int):
+        return x & 0xff
+    return builtins.ord(x)
+  
 #global switch
 debug = False
 
@@ -67,14 +78,14 @@ def zipUpDir(myzip, tdir, localname):
 # Get a 7 bit encoded number from file
 def bookReadEncodedNumber(fo):
     flag = False
-    data = fo.read(1)[0]
+    data = bord(fo.read(1)[0])
     if data == 0xFF:
         flag = True
-        data = fo.read(1)[0]
+        data = bord(fo.read(1)[0])
     if data >= 0x80:
         datax = (data & 0x7F)
         while data >= 0x80 :
-            data = fo.read(1)[0]
+            data = bord(fo.read(1)[0])
             datax = (datax <<7) + (data & 0x7F)
         data = datax
     if flag:
@@ -180,7 +191,7 @@ class TopazBook:
         def parseTopazHeaderRecord():
             # Read and parse one header record at the current book file position and return the associated data
             # [[offset,decompressedLength,compressedLength],...]
-            if self.fo.read(1)[0] != 0x63:
+            if bord(self.fo.read(1)[0]) != 0x63:
                 raise DrmException("Parse Error : Invalid Header")
             tag = bookReadString(self.fo)
             record = bookReadHeaderRecordData()
@@ -191,7 +202,7 @@ class TopazBook:
             result = parseTopazHeaderRecord()
             if debug: print(result[0], ": ", result[1])
             self.bookHeaderRecords[result[0]] = result[1]
-        if self.fo.read(1)[0]  != 0x64 :
+        if bord(self.fo.read(1)[0])  != 0x64 :
             raise DrmException("Parse Error : Invalid Header")
         self.bookPayloadOffset = self.fo.tell()
 
@@ -201,8 +212,8 @@ class TopazBook:
         tag = bookReadString(self.fo)
         if tag != b'metadata' :
             raise DrmException("Parse Error : Record Names Don't Match")
-        flags = self.fo.read(1)[0]
-        nbRecords = self.fo.read(1)[0]
+        flags = bord(self.fo.read(1)[0])
+        nbRecords = bord(self.fo.read(1)[0])
         if debug: print("Metadata Records: %d" % nbRecords)
         for i in range (0,nbRecords) :
             keyval = bookReadString(self.fo)
