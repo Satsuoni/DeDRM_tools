@@ -17,7 +17,17 @@ from struct import unpack
 
 #@@CALIBRE_COMPAT_CODE@@
 
+try:
+    import builtins
+except ImportError:
+    import __builtin__ as builtins
 
+def bord(x):
+    """Cross-version ord() accepting 1-char strings, 1-byte bytes, or ints."""
+    if isinstance(x, int):
+        return x & 0xff
+    return builtins.ord(x)
+    
 class TpzDRMError(Exception):
     pass
 
@@ -36,20 +46,20 @@ def readEncodedNumber(file):
     c = file.read(1)
     if (len(c) == 0):
         return None
-    data = c[0]
+    data = bord(c[0])
     if data == 0xFF:
         flag = True
         c = file.read(1)
         if (len(c) == 0):
             return None
-        data = c[0]
+        data = bord(c[0])
     if data >= 0x80:
         datax = (data & 0x7F)
         while data >= 0x80 :
             c = file.read(1)
             if (len(c) == 0):
                 return None
-            data = c[0]
+            data = bord(c[0])
             datax = (datax <<7) + (data & 0x7F)
         data = datax
     if flag:
