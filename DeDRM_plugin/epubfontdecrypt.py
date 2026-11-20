@@ -33,7 +33,17 @@ import itertools
 import hashlib
 import binascii
 
+try:
+    import builtins
+except ImportError:
+    import __builtin__ as builtins
 
+def bord(x):
+    """Cross-version ord() accepting 1-char strings, 1-byte bytes, or ints."""
+    if isinstance(x, int):
+        return x & 0xff
+    return builtins.ord(x)
+    
 class Decryptor(object):
     def __init__(self, obfuscationkeyIETF, obfuscationkeyAdobe, encryption):
         enc = lambda tag: '{%s}%s' % ('http://www.w3.org/2001/04/xmlenc#', tag)
@@ -305,7 +315,7 @@ def decryptFontsBook(inpath, outpath):
                         zi.create_system = oldzi.create_system
                         zi.create_version = oldzi.create_version
 
-                        if any(ord(c) >= 128 for c in path) or any(c >= 128 for c in zi.comment):
+                        if any(bord(c) >= 128 for c in path) or any(bord(c) >= 128 for c in zi.comment):
                             # If the file name or the comment contains any non-ASCII char, set the UTF8-flag
                             zi.flag_bits |= 0x800
                     except:
