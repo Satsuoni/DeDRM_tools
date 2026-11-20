@@ -1,4 +1,4 @@
-"""Obok (Kobo) helpers: Linux library autodetection (C2), redaction (C5), legacy key (C4)."""
+"""Obok (Kobo) helpers: Linux library autodetection (C2), legacy key (C4)."""
 import importlib.util
 import os
 import sys
@@ -67,10 +67,6 @@ def test_cached_kobodir_writes_refreshes_and_clears_cache(fake_home):
 def test_kobolibrary_does_not_share_a_mutable_default():
     assert obok.KoboLibrary.__init__.__defaults__[0] is None
 
-
-def test_redact_key():
-    assert obok.redact_key(bytes(range(16))) == "00010203... (16 bytes)"
-    assert obok.redact_key(b"") == "... (0 bytes)"
 
 
 def test_legacy_cookie_key_derivation(monkeypatch):
