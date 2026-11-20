@@ -77,7 +77,10 @@ def make_plugin_zip(src_dir, tmp_dir, apply_compat_patch):
     The source tree is never zipped directly, so caches or leftovers from a
     crashed run cannot end up in the release. Returns the zip file name.
     """
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+    try:
+        shutil.rmtree(tmp_dir)
+    except:
+        pass
     shutil.copytree(src_dir, tmp_dir, ignore=_ignore_junk)
     try:
         if apply_compat_patch:
@@ -91,7 +94,10 @@ def make_plugin_zip(src_dir, tmp_dir, apply_compat_patch):
 
 
 def make_release(version):
-    shutil.rmtree(RELEASE_DIR, ignore_errors=True)
+    try:
+        shutil.rmtree(RELEASE_DIR)
+    except:
+        pass
     os.mkdir(RELEASE_DIR)
 
     # Package both plugins from cleaned temporary copies.
