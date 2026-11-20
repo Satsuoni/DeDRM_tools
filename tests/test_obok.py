@@ -23,8 +23,9 @@ legacy_obok = _load("legacy_obok")
 def fake_home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr(obok, "KOBODIR_LINUX_ROOTS", ("~", str(tmp_path / "mnt")))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home)) #does this even work on Windows?
+    monkeypatch.setattr(obok, "KOBODIR_LINUX_ROOTS", ("~", str(tmp_path / "mnt") ))
     return home
 
 
