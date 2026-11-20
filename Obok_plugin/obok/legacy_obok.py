@@ -25,7 +25,10 @@ class legacy_obok(object):
     
     def plist_to_dictionary(self, filename):
         from subprocess import Popen, PIPE
-        from plistlib import loads as plist_loads
+        try:
+            from plistlib import loads as plist_loads
+        except:
+            from plistlib import readPlistFromString as plist_loads
         'Pipe the binary plist through plutil and parse the xml output'
         with open(filename, 'rb') as f:
             content = f.read()
