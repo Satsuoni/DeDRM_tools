@@ -17,7 +17,17 @@
 
     Adjusted for Python 3, September 2020
 """
-
+try:
+    import builtins
+except ImportError:
+    import __builtin__ as builtins
+    
+def bord(x):
+    """Cross-version, better ord() accepting 1-char strings, 1-byte bytes, or ints."""
+    if isinstance(x, int):
+        return x & 0xff
+    return builtins.ord(x)
+        
 class CryptoError(Exception):
     """ Base class for crypto exceptions """
     def __init__(self,errorMessage='Error!'):
@@ -39,11 +49,11 @@ class DecryptNotBlockAlignedError(DecryptError):
 def xorS(a,b):
     """ XOR two equal-length byte strings """
     assert len(a)==len(b)
-    return bytes(x ^ y for x, y in zip(a, b))
+    return bytes(bytearray(x ^ y for x, y in zip(bytearray(a), bytearray(b))))
 
 def xor(a,b):
     """ XOR two byte strings, truncated to the shorter one """
-    return bytes(x ^ y for x, y in zip(a, b))
+    return bytes(bytearray(x ^ y for x, y in zip(bytearray(a), bytearray(b))))
 
 """
     Base 'BlockCipher' and Pad classes for cipher instances.
@@ -135,13 +145,13 @@ class padWithPadLen(Pad):
             of the block size """
         blocks, numExtraBytes = divmod(len(extraBytes), blockSize)
         padLength = blockSize - numExtraBytes
-        return extraBytes + bytes([padLength]) * padLength
+        return extraBytes + bytes(bytearray([padLength])) * padLength
 
     def removePad(self, paddedBinaryString, blockSize):
         """ Remove padding from a binary string """
         if not(0<len(paddedBinaryString)):
             raise DecryptNotBlockAlignedError('Expected More Data')
-        return paddedBinaryString[:-paddedBinaryString[-1]]
+        return paddedBinaryString[:-bord(paddedBinaryString[-1])]
 
 class noPadding(Pad):
     """ No padding. Use this to get ECB behavior from encrypt/decrypt """
@@ -218,11 +228,11 @@ class Rijndael(BlockCipher):
     def _toBlock(self, bs):
         """ Convert binary string to array of bytes, state[col][row]"""
         assert ( len(bs) == 4*self.Nb ), 'Rijndarl blocks must be of size blockSize'
-        return [[bs[4*i],bs[4*i+1],bs[4*i+2],bs[4*i+3]] for i in range(self.Nb)]
+        return [[bord(bs[4*i]),bord(bs[4*i+1]),bord(bs[4*i+2]),bord(bs[4*i+3])] for i in range(self.Nb)]
 
     def _toBString(self, block):
         """ Convert block (array of bytes) to binary string """
-        return bytes(rowElement for col in block for rowElement in col)
+        return bytes(bytearray(rowElement for col in block for rowElement in col))
 #-------------------------------------
 """    Number of rounds Nr = NrTable[Nb][Nk]
 
@@ -237,7 +247,7 @@ NrTable =  {4: {4:10,  5:11,  6:12,  7:13,  8:14},
 def keyExpansion(algInstance, keyString):
     """ Expand a string of size keySize into a larger array """
     Nk, Nb, Nr = algInstance.Nk, algInstance.Nb, algInstance.Nr # for readability
-    key = list(keyString)  # convert byte string to list of ints
+    key = list(bytearray(keyString))  # convert byte string to list of ints
     w = [[key[4*i],key[4*i+1],key[4*i+2],key[4*i+3]] for i in range(Nk)]
     for i in range(Nk,Nb*(Nr+1)):
         temp = w[i-1]        # a four byte column
@@ -519,7 +529,7 @@ class CBC(BlockCipher):
         if self.encryptBlockCount == 0:
             if self.iv == None:
                 # generate IV and use
-                self.iv = bytes(self.r.randrange(256) for i in range(self.blockSize))
+                self.iv = bytes(bytearray(self.r.randrange(256) for i in range(self.blockSize)))
                 self.prior_encr_CT_block = self.iv
                 auto_IV = self.prior_encr_CT_block    # prepend IV if it's automatic
             else:                       # application provided IV
