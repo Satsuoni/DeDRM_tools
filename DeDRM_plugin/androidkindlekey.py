@@ -60,7 +60,7 @@ def unpad(data, padding=16):
 
 def pad(data, padding_len=16):
     padding_data_len = padding_len - (len(data) % padding_len)
-    plaintext = data + chr(padding_data_len) * padding_data_len
+    plaintext = data + bytes([padding_data_len]) * padding_data_len
     return plaintext
 
 class AndroidObfuscation(object):
@@ -127,10 +127,11 @@ def get_serials1(path=STORAGE1):
         obfuscation = AndroidObfuscation()
 
     def get_value(key):
-        encrypted_key = obfuscation.encrypt(key)
+        # encrypt() yields hex bytes; the XML keys/values are str
+        encrypted_key = obfuscation.encrypt(key).decode('ascii')
         encrypted_value = storage.get(encrypted_key)
         if encrypted_value:
-            return obfuscation.decrypt(encrypted_value)
+            return obfuscation.decrypt(encrypted_value).decode('utf-8', 'replace')
         return ''
 
     # also see getK4Pids in kgenpids.py
@@ -395,7 +396,7 @@ def gui_main():
                     success = True
                     tkinter.messagebox.showinfo(progname, "Key successfully retrieved to {0}".format(outfile))
             except Exception as e:
-                self.status['text'] = "Error: {0}".format(e.args[0])
+                self.status['text'] = "Error: {0}".format(str(e))
                 return
             self.status['text'] = "Select backup.ab file"
 

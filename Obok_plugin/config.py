@@ -30,8 +30,9 @@ class ConfigWidget(QWidget):
         layout = QVBoxLayout(self)
         self.setLayout(layout)
 
-        # copy of preferences
-        self.tmpserials = plugin_prefs['kobo_serials']
+        # copy of preferences (a real copy: ManageKeysDialog edits it in place,
+        # and it must only reach the prefs when the user clicks Apply)
+        self.tmpserials = list(plugin_prefs['kobo_serials'])
         self.kobodirectory = plugin_prefs['kobo_directory']
 
         combo_label = QLabel(_('When should Obok try to insert EPUBs into existing calibre entries?'), self)
@@ -92,7 +93,7 @@ class ConfigWidget(QWidget):
             find_homes = self.find_homes.currentText()
 
         plugin_prefs['finding_homes_for_formats'] = find_homes
-        plugin_prefs['kobo_serials'] = self.tmpserials
+        plugin_prefs['kobo_serials'] = list(self.tmpserials)
         plugin_prefs['kobo_directory'] = self.kobodirectory
 
 

@@ -11,6 +11,21 @@ Take a look at [the CHANGELOG](https://github.com/noDRM/DeDRM_tools/blob/master/
 
 My version of the plugin should both work with Calibre 5.x/6.x (Python 3) as well as Calibre 4.x and lower (Python 2). If you encounter issues with this plugin in Calibre 4.x or lower, please open a bug report. 
 
+# Running the tests
+
+The `tests/` directory contains a pytest suite that runs without calibre or Qt.
+It needs `pytest`, `pycryptodomex` and `lxml`:
+
+```
+python -m pip install pytest pycryptodomex lxml
+python -m pytest
+```
+
+The suite includes end-to-end tests that construct real DRM-encrypted books and
+decrypt them, so it exercises the actual crypto rather than mocks. calibre 5.x
+users can run it with calibre's own interpreter (`/usr/bin/python3.10` on many
+Linux installs), which is the version the plugin actually runs under.
+
 # Original README from Apprentice Harper
 
 This is a repository that tracks all the scripts and other tools for removing DRM from ebooks that I could find, committed in date order as best as I could manage. (Except for the Requiem tools for Apple's iBooks, and Convert LIT for Microsoft's .lit ebooks.) This includes the tools from a time before Apprentice Alf had a blog, and continues through to when Apprentice Harper (with help) took over maintenance of the tools.

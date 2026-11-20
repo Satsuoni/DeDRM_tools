@@ -310,7 +310,7 @@ def decryptBook(userkey, inpath, outpath):
                         zi.create_system = oldzi.create_system
                         zi.create_version = oldzi.create_version
 
-                        if any(ord(c) >= 128 for c in path) or any(ord(c) >= 128 for c in zi.comment):
+                        if any(ord(c) >= 128 for c in path) or any(c >= 128 for c in zi.comment):
                             # If the file name or the comment contains any non-ASCII char, set the UTF8-flag
                             zi.flag_bits |= 0x800
                     except:
@@ -446,7 +446,7 @@ def gui_main():
             try:
                 decrypt_status = decryptBook(userkey, inpath, outpath)
             except Exception as e:
-                self.status['text'] = "Error: {0}".format(e.args[0])
+                self.status['text'] = "Error: {0}".format(str(e))
                 return
             if decrypt_status == 0:
                 self.status['text'] = "File successfully decrypted"

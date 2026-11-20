@@ -94,7 +94,7 @@ try:
 except:
   from utilities import SafeUnbuffered
   from argv_utils import unicode_argv
-  
+
 from ion import unwrap_account_secrets
 
 # cleanup unicode filenames
@@ -317,7 +317,7 @@ def decryptBook(infile, outdir, kDatabaseFiles, androidFiles, serials, pids):
     try:
         book = GetDecryptedBook(infile, kDatabases, androidFiles, serials, pids, starttime)
     except Exception as e:
-        print("Error decrypting book after {1:.1f} seconds: {0}".format(e.args[0],time.time()-starttime))
+        print("Error decrypting book after {1:.1f} seconds: {0}".format(str(e),time.time()-starttime))
         traceback.print_exc()
         return 1
 

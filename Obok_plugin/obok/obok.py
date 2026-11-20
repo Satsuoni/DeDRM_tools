@@ -181,7 +181,6 @@ import re
 import zipfile
 import hashlib
 import xml.etree.ElementTree as ET
-import string
 import shutil
 import argparse
 import tempfile
@@ -214,6 +213,16 @@ KOBO_HASH_KEYS = ['88b3a2e13', 'XzUhGYdFp', 'NoCanLook','QJhwzAtXL']
 class ENCRYPTIONError(Exception):
     pass
 
+def redact_key(key):
+    """Short, non-recoverable description of a key for log output.
+
+    Logs end up pasted into bug reports, so never print a full key.
+
+    :param key: bytes
+    :return: str such as '00010203... (16 bytes)'
+    """
+    return "{0}... ({1} bytes)".format(binascii.hexlify(bytes(key[:4])).decode('ascii'), len(key))
+
 # Wrap a stream so that output gets flushed immediately
 # and also make sure that any unicode strings get
 # encoded using "replace" before writing them.
@@ -224,8 +233,7 @@ class SafeUnbuffered:
         if self.encoding == None:
             self.encoding = "utf-8"
     def write(self, data):
-        if isinstance(data,str) or isinstance(data,unicode):
-            # str for Python3, unicode for Python2
+        if isinstance(data, str):
             data = data.encode(self.encoding,"replace")
         try:
             buffer = getattr(self.stream, 'buffer', self.stream)
@@ -239,6 +247,88 @@ class SafeUnbuffered:
         return getattr(self.stream, attr)
 
 
+# Locating the Kobo Desktop Edition database on Linux.
+# Fast path: the known Windows-profile layouts, inside Wine prefixes under the
+# user's home or on a mounted Windows partition. Slow path: a bounded walk of
+# the home directory only (mount roots can be arbitrarily large).
+KOBODIR_LINUX_ROOTS = ('~', '/media', '/mnt', '/run/media')
+KOBODIR_LINUX_PROFILE_GLOBS = (
+    '.wine*/drive_c/users/*',
+    '.local/share/wineprefixes/*/drive_c/users/*',
+    '.PlayOnLinux/wineprefix/*/drive_c/users/*',
+    '.var/app/*/data/wine/drive_c/users/*',   # flatpak Wine
+    'Users/*',                                # mounted Windows partition
+    '*/Users/*',                              # ... one level down (/media/<user>/<disk>/Users)
+)
+KOBO_DESKTOP_SUBDIRS = (
+    os.path.join('AppData', 'Local', 'Kobo', 'Kobo Desktop Edition'),
+    os.path.join('Local Settings', 'Application Data', 'Kobo', 'Kobo Desktop Edition'),
+)
+KOBODIR_LINUX_WALK_MAX_DEPTH = 12
+KOBODIR_LINUX_WALK_MAX_DIRS = 100000
+KOBODIR_LINUX_PRUNE_DIRS = frozenset(('.cache', '.git', 'node_modules', '__pycache__'))
+
+def find_kobodir_linux():
+    """Return the first directory containing Kobo.sqlite, or None.
+
+    Checks the known Wine / Windows profile locations first, then falls back
+    to a walk of the home directory that is bounded both in depth and in the
+    number of directories visited, stopping at the first hit.
+
+    :return: str or None
+    """
+    import glob
+    for root in KOBODIR_LINUX_ROOTS:
+        root = os.path.expanduser(root)
+        if not os.path.isdir(root):
+            continue
+        for pattern in KOBODIR_LINUX_PROFILE_GLOBS:
+            for profile in sorted(glob.glob(os.path.join(root, pattern))):
+                for subdir in KOBO_DESKTOP_SUBDIRS:
+                    candidate = os.path.join(profile, subdir)
+                    if os.path.isfile(os.path.join(candidate, 'Kobo.sqlite')):
+                        return candidate
+
+    home = os.path.expanduser('~')
+    base_depth = home.rstrip(os.sep).count(os.sep)
+    visited = 0
+    for dirpath, dirnames, filenames in os.walk(home):
+        if 'Kobo.sqlite' in filenames:
+            return dirpath
+        visited += 1
+        if visited >= KOBODIR_LINUX_WALK_MAX_DIRS:
+            break
+        if dirpath.count(os.sep) - base_depth >= KOBODIR_LINUX_WALK_MAX_DEPTH:
+            dirnames[:] = []   # os.walk API: prune in place
+            continue
+        dirnames[:] = [d for d in dirnames if d not in KOBODIR_LINUX_PRUNE_DIRS]
+    return None
+
+def cached_kobodir_linux():
+    """Locate the Kobo Desktop directory on Linux, caching the result in
+    ~/.config/calibre/"kobo location" so the search only runs once. A stale
+    cache entry (Kobo.sqlite no longer there) is discarded and refreshed.
+
+    :return: str or None
+    """
+    cache_dir = os.path.join(os.path.expanduser('~'), ".config", "calibre")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, "kobo location")
+
+    if os.path.isfile(cache_file):
+        with open(cache_file, 'r') as f:
+            cached = f.read().strip()
+        if cached and os.path.isfile(os.path.join(cached, "Kobo.sqlite")):
+            return cached
+        os.remove(cache_file)
+
+    found = find_kobodir_linux()
+    if found is not None:
+        with open(cache_file, 'w') as f:
+            f.write(found)
+    return found
+
+
 class KoboLibrary(object):
     """The Kobo library.
 
@@ -246,8 +336,10 @@ class KoboLibrary(object):
     written by the Kobo Desktop Edition application, including the list
     of books, their titles, and the user's encryption key(s)."""
 
-    def __init__ (self, serials = [], device_path = None, desktopkobodir = u""):
+    def __init__ (self, serials = None, device_path = None, desktopkobodir = u""):
         print(__about__)
+        # copy: device serials found below are appended and must not leak into the caller's list
+        serials = list(serials) if serials else []
         self.kobodir = u""
         kobodb = u""
 
@@ -305,53 +397,23 @@ class KoboLibrary(object):
 
             if (self.kobodir == u""):
                 if sys.platform.startswith('win'):
-                    try:
-                        import winreg
-                    except ImportError:
-                        import _winreg as winreg
                     if sys.getwindowsversion().major > 5:
-                        if 'LOCALAPPDATA' in os.environ.keys():
-                            # Python 2.x does not return unicode env. Use Python 3.x
-                            if sys.version_info[0] == 2:
-                                self.kobodir = winreg.ExpandEnvironmentStrings(u"%LOCALAPPDATA%")
-                            else: 
-                                self.kobodir = winreg.ExpandEnvironmentStrings("%LOCALAPPDATA%")
+                        if 'LOCALAPPDATA' in os.environ:
+                            self.kobodir = os.environ['LOCALAPPDATA']
                     if (self.kobodir == u""):
-                        if 'USERPROFILE' in os.environ.keys():
-                            # Python 2.x does not return unicode env. Use Python 3.x
-                            if sys.version_info[0] == 2:
-                                self.kobodir = os.path.join(winreg.ExpandEnvironmentStrings(u"%USERPROFILE%"), "Local Settings", "Application Data")
-                            else: 
-                                self.kobodir = os.path.join(winreg.ExpandEnvironmentStrings("%USERPROFILE%"), "Local Settings", "Application Data")
+                        if 'USERPROFILE' in os.environ:
+                            self.kobodir = os.path.join(os.environ['USERPROFILE'], "Local Settings", "Application Data")
                     self.kobodir = os.path.join(self.kobodir, "Kobo", "Kobo Desktop Edition")
                 elif sys.platform.startswith('darwin'):
                     self.kobodir = os.path.join(os.environ['HOME'], "Library", "Application Support", "Kobo", "Kobo Desktop Edition")
                 elif sys.platform.startswith('linux'):
-
-                    #sets ~/.config/calibre as the location to store the kobodir location info file and creates this directory if necessary
-                    kobodir_cache_dir = os.path.join(os.environ['HOME'], ".config", "calibre")
-                    if not os.path.isdir(kobodir_cache_dir):
-                        os.mkdir(kobodir_cache_dir)
-                    
-                    #appends the name of the file we're storing the kobodir location info to the above path
-                    kobodir_cache_file = str(kobodir_cache_dir) + "/" + "kobo location"
-                    
-                    """if the above file does not exist, recursively searches from the root
-                    of the filesystem until kobodir is found and stores the location of kobodir
-                    in that file so this loop can be skipped in the future"""
-                    original_stdout = sys.stdout
-                    if not os.path.isfile(kobodir_cache_file):
-                        for root, dirs, files in os.walk('/'):
-                            for file in files:
-                                if file == 'Kobo.sqlite':
-                                    kobo_linux_path = str(root)
-                                    with open(kobodir_cache_file, 'w') as f:
-                                        sys.stdout = f
-                                        print(kobo_linux_path, end='')
-                                        sys.stdout = original_stdout
-
-                    f = open(kobodir_cache_file, 'r' )
-                    self.kobodir = f.read()
+                    found = cached_kobodir_linux()
+                    if found is None:
+                        print("Kobo.sqlite not found under {0}. If Kobo Desktop is installed elsewhere, "
+                              "set the Kobo directory in the Obok plugin settings.".format(
+                              ", ".join(KOBODIR_LINUX_ROOTS)))
+                    else:
+                        self.kobodir = found
 
             # desktop versions use Kobo.sqlite
             kobodb = os.path.join(self.kobodir, "Kobo.sqlite")
@@ -367,14 +429,22 @@ class KoboLibrary(object):
             # so we can ensure it's not using WAL logging which sqlite3 can't do.
             self.newdb = tempfile.NamedTemporaryFile(mode='wb', delete=False)
             print(self.newdb.name)
-            olddb = open(kobodb, 'rb')
-            self.newdb.write(olddb.read(18))
-            self.newdb.write(b'\x01\x01')
-            olddb.read(2)
-            self.newdb.write(olddb.read())
-            olddb.close()
-            self.newdb.close()
-            self.__sqlite = sqlite3.connect(self.newdb.name)
+            try:
+                with open(kobodb, 'rb') as olddb:
+                    self.newdb.write(olddb.read(18))
+                    self.newdb.write(b'\x01\x01')
+                    olddb.read(2)
+                    self.newdb.write(olddb.read())
+                self.newdb.close()
+                self.__sqlite = sqlite3.connect(self.newdb.name)
+            except Exception:
+                # don't leave the half-written temp copy behind
+                self.newdb.close()
+                try:
+                    os.remove(self.newdb.name)
+                except OSError:
+                    pass
+                raise
             self.__sqlite.text_factory = lambda b: b.decode("utf-8", errors="ignore")
             self.__cursor = self.__sqlite.cursor()
             self._userkeys = []
@@ -429,7 +499,7 @@ class KoboLibrary(object):
         """The list of all MAC addresses on this machine."""
         macaddrs = []
         if sys.platform.startswith('win'):
-            c = re.compile('\s?(' + '[0-9a-f]{2}[:\-]' * 5 + '[0-9a-f]{2})(\s|$)', re.IGNORECASE)
+            c = re.compile(r'\s?(' + r'[0-9a-f]{2}[:\-]' * 5 + r'[0-9a-f]{2})(\s|$)', re.IGNORECASE)
             try: 
                 output = subprocess.Popen('ipconfig /all', shell=True, stdout=subprocess.PIPE, text=True).stdout
                 for line in output:
@@ -443,7 +513,7 @@ class KoboLibrary(object):
                     if m:
                         macaddrs.append(re.sub("-", ":", m.group(1)).upper())
         elif sys.platform.startswith('darwin'):
-            c = re.compile('\s(' + '[0-9a-f]{2}:' * 5 + '[0-9a-f]{2})(\s|$)', re.IGNORECASE)
+            c = re.compile(r'\s(' + r'[0-9a-f]{2}:' * 5 + r'[0-9a-f]{2})(\s|$)', re.IGNORECASE)
             output = subprocess.check_output('/sbin/ifconfig -a', shell=True, encoding='utf-8')
             matches = c.findall(output)
             for m in matches:
@@ -459,14 +529,14 @@ class KoboLibrary(object):
         else:
             # final fallback
             # let's try ip
-            c = re.compile('\s(' + '[0-9a-f]{2}:' * 5 + '[0-9a-f]{2})(\s|$)', re.IGNORECASE)
+            c = re.compile(r'\s(' + r'[0-9a-f]{2}:' * 5 + r'[0-9a-f]{2})(\s|$)', re.IGNORECASE)
             for line in os.popen('ip -br link'):
                 m = c.search(line)
                 if m:
                     macaddrs.append(m.group(1).upper())
 
             # let's try ipconfig under wine
-            c = re.compile('\s(' + '[0-9a-f]{2}-' * 5 + '[0-9a-f]{2})(\s|$)', re.IGNORECASE)
+            c = re.compile(r'\s(' + r'[0-9a-f]{2}-' * 5 + r'[0-9a-f]{2})(\s|$)', re.IGNORECASE)
             for line in os.popen('ipconfig /all'):
                 m = c.search(line)
                 if m:
@@ -604,24 +674,18 @@ class KoboFile(object):
             # assume utf-8 with no BOM
             textoffset = 0
             stride = 1
-            print("Checking text:{0}:".format(contents[:10]))
             # check for byte order mark
             if contents[:3]==b"\xef\xbb\xbf":
                 # seems to be utf-8 with BOM
-                print("Could be utf-8 with BOM")
                 textoffset = 3
             elif contents[:2]==b"\xfe\xff":
                 # seems to be utf-16BE
-                print("Could be  utf-16BE")
                 textoffset = 3
                 stride = 2
             elif contents[:2]==b"\xff\xfe":
                 # seems to be utf-16LE
-                print("Could be  utf-16LE")
                 textoffset = 2
                 stride = 2
-            else:
-                print("Perhaps utf-8 without BOM")
 
             # now check that the first few characters are in the ASCII range
             for i in range(textoffset,textoffset+5*stride,stride):
@@ -629,29 +693,7 @@ class KoboFile(object):
                     # Non-ascii, so decryption probably failed
                     print("Bad character at {0}, value {1}".format(i,contents[i]))
                     raise ValueError
-            print("Seems to be good text")
             return True
-            if contents[:5]==b"<?xml" or contents[:8]==b"\xef\xbb\xbf<?xml":
-                # utf-8
-                return True
-            elif contents[:14]==b"\xfe\xff\x00<\x00?\x00x\x00m\x00l":
-                # utf-16BE
-                return True
-            elif contents[:14]==b"\xff\xfe<\x00?\x00x\x00m\x00l\x00":
-                # utf-16LE
-                return True
-            elif contents[:9]==b"<!DOCTYPE" or contents[:12]==b"\xef\xbb\xbf<!DOCTYPE":
-                # utf-8 of weird <!DOCTYPE start
-                return True
-            elif contents[:22]==b"\xfe\xff\x00<\x00!\x00D\x00O\x00C\x00T\x00Y\x00P\x00E":
-                # utf-16BE of weird <!DOCTYPE start
-                return True
-            elif contents[:22]==b"\xff\xfe<\x00!\x00D\x00O\x00C\x00T\x00Y\x00P\x00E\x00":
-                # utf-16LE of weird <!DOCTYPE start
-                return True
-            else:
-                print("Bad XML: {0}".format(contents[:8]))
-                raise ValueError
         elif self.mimetype == 'image/jpeg':
             if contents[:3] == b'\xff\xd8\xff':
                 return True
@@ -665,7 +707,7 @@ def decrypt_book(book, lib):
     print("Converting {0}".format(book.title))
     zin = zipfile.ZipFile(book.filename, "r")
     # make filename out of Unicode alphanumeric and whitespace equivalents from title
-    outname = "{0}.epub".format(re.sub('[^\s\w]', '_', book.title, 0, re.UNICODE))
+    outname = "{0}.epub".format(re.sub(r'[^\s\w]', '_', book.title, 0, re.UNICODE))
     if (book.type == 'drm-free'):
         print("DRM-free book, conversion is not needed")
         shutil.copyfile(book.filename, outname)

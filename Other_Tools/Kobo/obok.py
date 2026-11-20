@@ -359,13 +359,11 @@ class KoboLibrary(object):
                 except ImportError:
                     import _winreg as winreg
                 if sys.getwindowsversion().major > 5:
-                    if 'LOCALAPPDATA' in os.environ.keys():
-                        # Python 2.x does not return unicode env. Use Python 3.x
-                        self.kobodir = winreg.ExpandEnvironmentStrings("%LOCALAPPDATA%")
+                    if 'LOCALAPPDATA' in os.environ:
+                        self.kobodir = os.environ['LOCALAPPDATA']
                 if (self.kobodir == u""):
-                    if 'USERPROFILE' in os.environ.keys():
-                        # Python 2.x does not return unicode env. Use Python 3.x
-                        self.kobodir = os.path.join(winreg.ExpandEnvironmentStrings("%USERPROFILE%"), "Local Settings", "Application Data")
+                    if 'USERPROFILE' in os.environ:
+                        self.kobodir = os.path.join(os.environ['USERPROFILE'], "Local Settings", "Application Data")
                 self.kobodir = os.path.join(self.kobodir, "Kobo", "Kobo Desktop Edition")
             elif sys.platform.startswith('darwin'):
                 self.kobodir = os.path.join(os.environ['HOME'], "Library", "Application Support", "Kobo", "Kobo Desktop Edition")

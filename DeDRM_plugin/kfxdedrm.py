@@ -554,7 +554,16 @@ class KFXZipBook:
                         self.decrypt_voucher(totalpids)
                     print("Decrypting KFX DRMION: {0}".format(filename))
                     outfile = BytesIO()
-                    DrmIon(BytesIO(data[8:-8]), self._key_holder,self.skeylist).parse(outfile)
+                    try:
+                        DrmIon(BytesIO(data[8:-8]), self._key_holder,self.skeylist).parse(outfile)
+                    except Exception as ex:
+                        if self.voucher is None and self.derived_key is None:
+                            # carried on without a voucher in case this was decrypted
+                            # KFX; it was not, so say what is actually missing
+                            raise Exception("The .kfx-zip archive contains an encrypted DRMION "
+                                            "file without a DRM voucher, and it could not be "
+                                            "read as decrypted KFX") from ex
+                        raise
                     self.decrypted[filename] = outfile.getvalue()
 
             self._open_relational_components(zf, totalpids)

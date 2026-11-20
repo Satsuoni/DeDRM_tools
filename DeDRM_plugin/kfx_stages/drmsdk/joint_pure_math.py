@@ -17,6 +17,45 @@ MASK64: Final[int] = 0xFFFFFFFFFFFFFFFF
 _DEG_TO_RAD_C3E68: Final[float] = struct.unpack("<d", struct.pack("<Q", 0x3F91DF46A2529D39))[0]
 
 
+def _cbrt_pure(x: float) -> float:
+    """Cube root without math.cbrt; exact on perfect cubes, where x ** (1/3) is not
+    (64 ** (1/3) == 3.9999999999999996, which truncates to 3)."""
+    if x == 0.0 or math.isnan(x) or math.isinf(x):
+        return x
+    r = abs(x) ** (1.0 / 3.0)
+    n = round(r)
+    if float(n) ** 3 == abs(x):
+        r = float(n)
+    else:
+        r -= (r * r * r - abs(x)) / (3.0 * r * r)  # one Newton step
+    return math.copysign(r, x)
+
+
+def _cbrt_libm():
+    """The C library cbrt that math.cbrt wraps on 3.11+, or None."""
+    try:
+        import ctypes
+        import ctypes.util
+        names = [ctypes.util.find_library("m"), ctypes.util.find_library("c"), "ucrtbase", "msvcrt"]
+        for name in names:
+            if not name:
+                continue
+            try:
+                fn = ctypes.CDLL(name).cbrt
+            except (OSError, AttributeError):
+                continue
+            fn.restype = ctypes.c_double
+            fn.argtypes = [ctypes.c_double]
+            return fn
+    except Exception:  # noqa: BLE001 - no ctypes, fall back to pure Python
+        pass
+    return None
+
+
+# math.cbrt is Python 3.11+; calibre builds on 3.8-3.10 need a stand-in
+_cbrt = getattr(math, "cbrt", None) or _cbrt_libm() or _cbrt_pure
+
+
 def _u32(x: int) -> int:
     return x & MASK32
 
@@ -499,7 +538,7 @@ def _combine_ossvec2(bn1: list[int], bn2: list[int], h1: int, d1: int, h3: int, 
     for a, b in zip(vec_a, vec_b):
         num = _s64(a * b + hd_dot)
         diff_ab = float(_s64(a - b))
-        den = _fcvtzs_i64(math.cbrt(hd_sum_sq + diff_ab * diff_ab))
+        den = _fcvtzs_i64(_cbrt(hd_sum_sq + diff_ab * diff_ab))
         out.append(_fcvtms_i64(float(num) / float(den)))
     return out
 

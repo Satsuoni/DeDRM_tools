@@ -301,7 +301,7 @@ class DeDRM(FileTypePlugin):
             fr = zipfix.fixZip(path_to_ebook, inf.name)
             fr.fix()
         except Exception as e:
-            print("{0} v{1}: Error \'{2}\' when checking zip archive".format(PLUGIN_NAME, PLUGIN_VERSION, e.args[0]))
+            print("{0} v{1}: Error \'{2}\' when checking zip archive".format(PLUGIN_NAME, PLUGIN_VERSION, str(e)))
             raise
 
         # import the decryption keys
@@ -457,9 +457,9 @@ class DeDRM(FileTypePlugin):
                                 print("{0} v{1}: Saving a new default key".format(PLUGIN_NAME, PLUGIN_VERSION))
                                 try:
                                     if userkey in defaultkeys_ade:
-                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','ade_passhash_'+str(int(time.time())),keyvalue)
+                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','ade_passhash_'+str(int(time.time())),userkey)
                                     else:
-                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','nook_key_'+str(int(time.time())),keyvalue)
+                                        dedrmprefs.addnamedvaluetoprefs('bandnkeys','nook_key_'+str(int(time.time())),userkey)
                                     dedrmprefs.writeprefs()
                                     print("{0} v{1}: Saved a new default key after {2:.1f} seconds".format(PLUGIN_NAME, PLUGIN_VERSION,time.time()-self.starttime))
                                 except:
@@ -469,8 +469,7 @@ class DeDRM(FileTypePlugin):
                                 return self.postProcessEPUB(of.name)
 
                             print("{0} v{1}: Failed to decrypt with new default key after {2:.1f} seconds".format(PLUGIN_NAME, PLUGIN_VERSION,time.time()-self.starttime))
-                            return inf.name
-                    
+
                     except:
                         pass
 
@@ -819,6 +818,10 @@ class DeDRM(FileTypePlugin):
 
             print("{0} v{1}: Failed to decrypt with key {2:s} after {3:.1f} seconds".format(PLUGIN_NAME, PLUGIN_VERSION,keyname,time.time()-self.starttime))
 
+        # No configured Adobe key could decrypt this PDF. Raise, rather than
+        # returning None, so calibre reports the failure instead of importing junk.
+        raise DeDRMError("{0} v{1}: Ultimately failed to decrypt after {2:.1f} seconds. Read the FAQs at noDRM's repository: https://github.com/noDRM/DeDRM_tools/blob/master/FAQs.md".format(PLUGIN_NAME, PLUGIN_VERSION, time.time()-self.starttime))
+
     def PDFStandardDecrypt(self, path_to_ebook):
         # Sub function to prevent PDFDecrypt from becoming too large ...
         import prefs
@@ -864,6 +867,7 @@ class DeDRM(FileTypePlugin):
                 return of.name
         
         print("{0} v{1}: Didn't manage to decrypt PDF. Make sure the correct password is entered in the settings.".format(PLUGIN_NAME, PLUGIN_VERSION))
+        raise DeDRMError("{0} v{1}: Ultimately failed to decrypt after {2:.1f} seconds. Read the FAQs at noDRM's repository: https://github.com/noDRM/DeDRM_tools/blob/master/FAQs.md".format(PLUGIN_NAME, PLUGIN_VERSION, time.time()-self.starttime))
 
         
     
@@ -937,7 +941,7 @@ class DeDRM(FileTypePlugin):
             decoded = False
             # perhaps we need to get a new default Kindle for Mac/PC key
             defaultkeys = []
-            print("{0} v{1}: Failed to decrypt with error: {2}".format(PLUGIN_NAME, PLUGIN_VERSION,e.args[0]))
+            print("{0} v{1}: Failed to decrypt with error: {2}".format(PLUGIN_NAME, PLUGIN_VERSION,str(e)))
 
             traceback.print_exc()
 

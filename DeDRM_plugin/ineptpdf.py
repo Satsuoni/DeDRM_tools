@@ -1012,7 +1012,7 @@ class PDFStream(PDFObject):
             # Handle encryption
             data = self.decipher(self.objid, self.genno, data)
         return data
-    
+
     def get_decdic(self):
         if self.decdic is not None:
             return self.decdic
@@ -1634,11 +1634,10 @@ class PDFDocument(object):
     def initialize_ebx_ignoble(self, keyb64, docid, param):
         self.is_printable = self.is_modifiable = self.is_extractable = True
 
-        try: 
-            key = keyb64.decode('base64')[:16]
-            # This will probably always error, but I'm not 100% sure, so lets leave the old code in.
-        except AttributeError: 
-            key = codecs.decode(keyb64.encode("ascii"), 'base64')[:16]
+        # The key may arrive as str (from prefs) or bytes (from the passhash dialog).
+        if isinstance(keyb64, str):
+            keyb64 = keyb64.encode('ascii')
+        key = base64.b64decode(keyb64)[:16]
 
 
         length = int_value(param.get('Length', 0)) / 8
@@ -2489,7 +2488,7 @@ def gui_main():
             try:
                 decrypt_status = decryptBook(userkey, inpath, outpath)
             except Exception as e:
-                self.status['text'] = "Error; {0}".format(e.args[0])
+                self.status['text'] = "Error; {0}".format(str(e))
                 return
             if decrypt_status == 0:
                 self.status['text'] = "File successfully decrypted"

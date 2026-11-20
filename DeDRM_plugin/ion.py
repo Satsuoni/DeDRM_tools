@@ -450,7 +450,7 @@ class BinaryIonParser(object):
         _assert(self.localremaining <= 8, "Decimal overflow")
 
         signed = False
-        b = [ord(x) for x in self.read(self.localremaining)]
+        b = list(self.read(self.localremaining))
         if (b[0] & 0x80) != 0:
             b[0] = b[0] & 0x7F
             signed = True
@@ -458,7 +458,7 @@ class BinaryIonParser(object):
         # Convert variably sized network order integer into 64-bit little endian
         j = 0
         vb = [0] * 8
-        for i in range(len(b), -1, -1):
+        for i in range(len(b) - 1, -1, -1):
             vb[i] = b[j]
             j += 1
 
@@ -687,7 +687,7 @@ class BinaryIonParser(object):
 
         result = ""
         for i in b:
-            result += ("%02x " % ord(i))
+            result += ("%02x " % i)
 
         if len(result) > 0:
             result = result[:-1]
@@ -1889,7 +1889,7 @@ class SKeyList(object):
         with open(self.filename, "a") as file:
           file.write("{}$secret_key:{}\n".format(keyid,key.hex()))
         self.secretkeys[keyid]=key
-                          
+
 class DrmIonVoucher(object):
     envelope = None
     version = None
@@ -2074,7 +2074,7 @@ class DrmIonVoucher(object):
                 self.secretkey =self.secretkeycandidate
                 self.drmkey=None
                 return
-                 
+
 
         self.secretkey = _extract_key_from_ion_bytes(b, strict=True) or b""
 
@@ -2177,7 +2177,7 @@ class DrmIonVoucher(object):
             self.secretkeycandidate=self.skeylist.secretkeys.get(self.voucher_id,None)
             if self.secretkeycandidate is not None:
                 print(f"Got secret key candidate from file: {self.secretkeycandidate.hex()}")
-           
+
     def parsevoucher(self):
         _assert(self.voucher.hasnext(), "Voucher is empty")
         root_tid = self.voucher.next()

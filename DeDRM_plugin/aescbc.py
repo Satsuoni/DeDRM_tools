@@ -37,19 +37,13 @@ class DecryptNotBlockAlignedError(DecryptError):
     """ Error in decryption processing """
 
 def xorS(a,b):
-    """ XOR two strings """
+    """ XOR two equal-length byte strings """
     assert len(a)==len(b)
-    x = []
-    for i in range(len(a)):
-        x.append( chr(ord(a[i])^ord(b[i])))
-    return ''.join(x)
+    return bytes(x ^ y for x, y in zip(a, b))
 
 def xor(a,b):
-    """ XOR two strings """
-    x = []
-    for i in range(min(len(a),len(b))):
-        x.append( chr(ord(a[i])^ord(b[i])))
-    return ''.join(x)
+    """ XOR two byte strings, truncated to the shorter one """
+    return bytes(x ^ y for x, y in zip(a, b))
 
 """
     Base 'BlockCipher' and Pad classes for cipher instances.
@@ -68,16 +62,16 @@ class BlockCipher:
         self.resetDecrypt()
     def resetEncrypt(self):
         self.encryptBlockCount = 0
-        self.bytesToEncrypt = ''
+        self.bytesToEncrypt = b''
     def resetDecrypt(self):
         self.decryptBlockCount = 0
-        self.bytesToDecrypt = ''
+        self.bytesToDecrypt = b''
 
     def encrypt(self, plainText, more = None):
-        """ Encrypt a string and return a binary string """
+        """ Encrypt a byte string and return a byte string """
         self.bytesToEncrypt += plainText  # append plainText to any bytes from prior encrypt
         numBlocks, numExtraBytes = divmod(len(self.bytesToEncrypt), self.blockSize)
-        cipherText = ''
+        cipherText = b''
         for i in range(numBlocks):
             bStart = i*self.blockSize
             ctBlock = self.encryptBlock(self.bytesToEncrypt[bStart:bStart+self.blockSize])
@@ -86,7 +80,7 @@ class BlockCipher:
         if numExtraBytes > 0:        # save any bytes that are not block aligned
             self.bytesToEncrypt = self.bytesToEncrypt[-numExtraBytes:]
         else:
-            self.bytesToEncrypt = ''
+            self.bytesToEncrypt = b''
 
         if more == None:   # no more data expected from caller
             finalBytes = self.padding.addPad(self.bytesToEncrypt,self.blockSize)
@@ -98,7 +92,7 @@ class BlockCipher:
         return cipherText
 
     def decrypt(self, cipherText, more = None):
-        """ Decrypt a string and return a string """
+        """ Decrypt a byte string and return a byte string """
         self.bytesToDecrypt += cipherText  # append to any bytes from prior decrypt
 
         numBlocks, numExtraBytes = divmod(len(self.bytesToDecrypt), self.blockSize)
@@ -111,7 +105,7 @@ class BlockCipher:
             numBlocks -= 1
             numExtraBytes = self.blockSize
 
-        plainText = ''
+        plainText = b''
         for i in range(numBlocks):
             bStart = i*self.blockSize
             ptBlock = self.decryptBlock(self.bytesToDecrypt[bStart : bStart+self.blockSize])
@@ -119,9 +113,9 @@ class BlockCipher:
             plainText += ptBlock
 
         if numExtraBytes > 0:        # save any bytes that are not block aligned
-            self.bytesToEncrypt = self.bytesToEncrypt[-numExtraBytes:]
+            self.bytesToDecrypt = self.bytesToDecrypt[-numExtraBytes:]
         else:
-            self.bytesToEncrypt = ''
+            self.bytesToDecrypt = b''
 
         if more == None:         # last decrypt remove padding
             plainText = self.padding.removePad(plainText, self.blockSize)
@@ -141,13 +135,13 @@ class padWithPadLen(Pad):
             of the block size """
         blocks, numExtraBytes = divmod(len(extraBytes), blockSize)
         padLength = blockSize - numExtraBytes
-        return extraBytes + padLength*chr(padLength)
+        return extraBytes + bytes([padLength]) * padLength
 
     def removePad(self, paddedBinaryString, blockSize):
         """ Remove padding from a binary string """
         if not(0<len(paddedBinaryString)):
             raise DecryptNotBlockAlignedError('Expected More Data')
-        return paddedBinaryString[:-ord(paddedBinaryString[-1])]
+        return paddedBinaryString[:-paddedBinaryString[-1]]
 
 class noPadding(Pad):
     """ No padding. Use this to get ECB behavior from encrypt/decrypt """
@@ -176,11 +170,11 @@ class Rijndael(BlockCipher):
         self.blockSize  = blockSize  # blockSize is in bytes
         self.padding    = padding    # change default to noPadding() to get normal ECB behavior
 
-        assert( keySize%4==0 and keySize/4 in NrTable[4]),'key size must be 16,20,24,29 or 32 bytes'
-        assert( blockSize%4==0 and blockSize/4 in NrTable), 'block size must be 16,20,24,29 or 32 bytes'
+        assert( keySize%4==0 and keySize//4 in NrTable[4]),'key size must be 16,20,24,29 or 32 bytes'
+        assert( blockSize%4==0 and blockSize//4 in NrTable), 'block size must be 16,20,24,29 or 32 bytes'
 
-        self.Nb = self.blockSize/4          # Nb is number of columns of 32 bit words
-        self.Nk = keySize/4                 # Nk is the key length in 32-bit words
+        self.Nb = self.blockSize//4         # Nb is number of columns of 32 bit words
+        self.Nk = keySize//4                # Nk is the key length in 32-bit words
         self.Nr = NrTable[self.Nb][self.Nk] # The number of rounds (Nr) is a function of
                                             # the block (Nb) and key (Nk) sizes.
         if key != None:
@@ -224,15 +218,11 @@ class Rijndael(BlockCipher):
     def _toBlock(self, bs):
         """ Convert binary string to array of bytes, state[col][row]"""
         assert ( len(bs) == 4*self.Nb ), 'Rijndarl blocks must be of size blockSize'
-        return [[ord(bs[4*i]),ord(bs[4*i+1]),ord(bs[4*i+2]),ord(bs[4*i+3])] for i in range(self.Nb)]
+        return [[bs[4*i],bs[4*i+1],bs[4*i+2],bs[4*i+3]] for i in range(self.Nb)]
 
     def _toBString(self, block):
         """ Convert block (array of bytes) to binary string """
-        l = []
-        for col in block:
-            for rowElement in col:
-                l.append(chr(rowElement))
-        return ''.join(l)
+        return bytes(rowElement for col in block for rowElement in col)
 #-------------------------------------
 """    Number of rounds Nr = NrTable[Nb][Nk]
 
@@ -247,14 +237,14 @@ NrTable =  {4: {4:10,  5:11,  6:12,  7:13,  8:14},
 def keyExpansion(algInstance, keyString):
     """ Expand a string of size keySize into a larger array """
     Nk, Nb, Nr = algInstance.Nk, algInstance.Nb, algInstance.Nr # for readability
-    key = [ord(byte) for byte in keyString]  # convert string to list
+    key = list(keyString)  # convert byte string to list of ints
     w = [[key[4*i],key[4*i+1],key[4*i+2],key[4*i+3]] for i in range(Nk)]
     for i in range(Nk,Nb*(Nr+1)):
         temp = w[i-1]        # a four byte column
         if (i%Nk) == 0 :
             temp     = temp[1:]+[temp[0]]  # RotWord(temp)
             temp     = [ Sbox[byte] for byte in temp ]
-            temp[0] ^= Rcon[i/Nk]
+            temp[0] ^= Rcon[i//Nk]
         elif Nk > 6 and  i%Nk == 4 :
             temp     = [ Sbox[byte] for byte in temp ]  # SubWord(temp)
         w.append( [ w[i-Nk][byte]^temp[byte] for byte in range(4) ] )
@@ -525,11 +515,11 @@ class CBC(BlockCipher):
 
     def encryptBlock(self, plainTextBlock):
         """ CBC block encryption, IV is set with 'encrypt' """
-        auto_IV = ''
+        auto_IV = b''
         if self.encryptBlockCount == 0:
             if self.iv == None:
                 # generate IV and use
-                self.iv = ''.join([chr(self.r.randrange(256)) for i in range(self.blockSize)])
+                self.iv = bytes(self.r.randrange(256) for i in range(self.blockSize))
                 self.prior_encr_CT_block = self.iv
                 auto_IV = self.prior_encr_CT_block    # prepend IV if it's automatic
             else:                       # application provided IV
@@ -546,7 +536,7 @@ class CBC(BlockCipher):
         if self.decryptBlockCount == 0:   # first call, process IV
             if self.iv == None:    # auto decrypt IV?
                 self.prior_CT_block = encryptedBlock
-                return ''
+                return b''
             else:
                 assert(len(self.iv)==self.blockSize),"Bad IV size on CBC decryption"
                 self.prior_CT_block = self.iv

@@ -168,7 +168,7 @@ def gui_main():
             try:
                 userkey = generate_key(name, ccn)
             except Exception as e:
-                self.status['text'] = "Error: (0}".format(e.args[0])
+                self.status['text'] = "Error: {0}".format(str(e))
                 return
             open(keypath,'wb').write(userkey)
             self.status['text'] = "Keyfile successfully generated"
