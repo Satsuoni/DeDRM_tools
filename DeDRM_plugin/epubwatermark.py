@@ -44,6 +44,8 @@ def removeHTMLwatermarks(object, path_to_ebook):
         modded_contents = []
 
         count_adept = 0
+        count_lokepub = 0
+        count_oceanofpdf = 0
         count_pocketbook = 0
         count_lemonink_invisible = 0
         count_lemonink_visible = 0
@@ -74,6 +76,31 @@ def removeHTMLwatermarks(object, path_to_ebook):
                 if (str_new != pre_remove):
                     count_pocketbook += 1
 
+                # Remove Lokepub / noveldb watermarks
+                pre_remove = str_new
+                # Remove HTML comment <!-- noveldb-epub-ad -->
+                str_new = re.sub(r'((\r\n|\r|\n)\s*)?<!--\s*noveldb-epub-ad\s*-->', '', str_new)
+                # Remove the whole div that includes the link for lokepub
+                str_new = re.sub(
+                    r'<div\s+style="[^"]*"[^>]*>\s*'
+                    r'<p\s+style="[^"]*"[^>]*>.*?</p>\s*'
+                    r'<p\s+style="[^"]*"[^>]*>.*?<a\s+href="https?://(?:www\.)?lokepub\.com[^"]*"[^>]*>.*?</a>.*?</p>\s*'
+                    r'</div>',
+                    '', str_new, flags=re.DOTALL
+                )
+                if (str_new != pre_remove):
+                    count_lokepub += 1
+                    
+                # Remove OceanofPDF.com watermarks
+                pre_remove = str_new
+                str_new = re.sub(
+                    r'<div\s+style="float:\s*none;\s*margin:\s*10px\s+0px\s+10px\s+0px;\s*text-align:\s*center;"[^>]*>\s*'
+                    r'<p>\s*<a\s+href="https?://(?:www\.)?oceanofpdf\.com[^"]*"[^>]*>\s*<i>\s*OceanofPDF\.com\s*</i>\s*</a>\s*</p>\s*'
+                    r'</div>',
+                    '', str_new, flags=re.DOTALL
+                )
+                if (str_new != pre_remove):
+                    count_oceanofpdf += 1
 
                 # Remove eLibri / LemonInk watermark
                 # Run this in a loop, as it is possible a file has been watermarked twice ...
@@ -170,6 +197,12 @@ def removeHTMLwatermarks(object, path_to_ebook):
 
         if (count_adept > 0):
             print("Watermark: Successfully stripped {0} ADEPT watermark(s) from ebook.".format(count_adept))
+            
+        if (count_lokepub > 0):
+            print("Watermark: Successfully stripped {0} lokepub watermark(s) from ebook.".format(count_lokepub))
+
+        if (count_oceanofpdf > 0):
+            print("Watermark: Successfully stripped {0} OceanofPDF watermark(s) from ebook.".format(count_oceanofpdf))
         
         if (count_lemonink_invisible > 0 or count_lemonink_visible > 0):
             print("Watermark: Successfully stripped {0} visible and {1} invisible LemonInk watermark(s) (\"{2}\") from ebook."
